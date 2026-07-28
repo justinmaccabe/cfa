@@ -158,6 +158,8 @@ SEED_CHECKLIST = [
     ("register", "Set an early-registration reminder", "deadline ~Oct 14 · saves $350", 2),
     ("calc", "Calculator ready (BA II Plus)", "dust it off / replace if flaky", 3),
     ("freeze", "Freeze the tracker build before Aug 12", "then it's a study tool", 4),
+    ("aug12_cfai", "Aug 12 — revisit enhancements + load CFAI materials into Claude",
+     "weave CFAI QBank / mocks / LOS into the plan (see ROADMAP.md)", 5),
 ]
 
 SEED_SETTINGS = {
@@ -225,10 +227,14 @@ def _init_db(seed: bool = True):
                 dict(section_id=rid[r], code=c, name=n, status="Not Started",
                      r1_done=False, r2_done=False, r3_done=False)
                 for (r, c, n) in curr.ITEMS])
-        if conn.execute(select(func.count()).select_from(checklist)).scalar() == 0:
+        # idempotent: add any checklist items missing from the current DB (so new
+        # seeded tasks appear on existing/deployed databases, not just fresh ones)
+        have_keys = set(conn.execute(select(checklist.c.key)).scalars())
+        missing = [(k, l, n, s) for (k, l, n, s) in SEED_CHECKLIST if k not in have_keys]
+        if missing:
             conn.execute(checklist.insert(), [
                 dict(key=k, label=l, note=n, sort=s, done=False)
-                for (k, l, n, s) in SEED_CHECKLIST])
+                for (k, l, n, s) in missing])
         if conn.execute(select(func.count()).select_from(settings)).scalar() == 0:
             conn.execute(settings.insert(), [
                 dict(key=k, value=v) for k, v in SEED_SETTINGS.items()])
