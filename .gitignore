@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+cfa.db
+.streamlit/secrets.toml
+.venv/
+venv/
+.DS_Store
+# never commit copyrighted study materials to the public repo
+*.pdf
+*.xlsx
+resources/

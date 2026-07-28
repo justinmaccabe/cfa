@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "cfa-tracker",
+      "runtimeExecutable": "/Users/optadmin/Documents/cfa-l2-tracker/.venv/bin/streamlit",
+      "runtimeArgs": ["run", "/Users/optadmin/Documents/cfa-l2-tracker/app.py", "--server.headless=true", "--server.port=8501"],
+      "port": 8501
+    }
+  ]
+}
