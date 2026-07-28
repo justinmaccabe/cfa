@@ -14,13 +14,21 @@ Everything in the repo is already prepped for them.
 3. Copy the **connection string** (looks like `postgresql://user:pass@ep-xxx.neon.tech/dbname?sslmode=require`).
 
 ## 2. GitHub — push this repo (private)
+`gh` needs a one-time login first (this is the "please run: gh auth login" message):
+```bash
+gh auth login          # choose GitHub.com → HTTPS → log in via browser
+cd ~/Documents/cfa-l2-tracker
+gh repo create cfa-l2-tracker --private --source=. --push
+```
+No `gh`? Make an empty **private** repo at github.com/new, then:
 ```bash
 cd ~/Documents/cfa-l2-tracker
-git add -A && git commit -m "CFA L2 tracker"
-gh repo create cfa-l2-tracker --private --source=. --push   # or create the repo in the UI
+git remote add origin https://github.com/<your-username>/cfa-l2-tracker.git
+git branch -M main && git push -u origin main
 ```
-Copyrighted PDFs never land here — `.gitignore` excludes `*.pdf` / `*.xlsx`, and the
-files live in the DB, not the repo.
+The auto-set commit author ("Opt Admin …") is harmless; to use your name instead (optional):
+`git config --global user.name "Justin Maccabe" && git config --global user.email "justin.maccabe@ofg.com"`.
+Copyrighted PDFs never land here — `.gitignore` excludes `*.pdf` / `*.xlsx`; the files live in the DB.
 
 ## 3. Streamlit Community Cloud — deploy
 1. Go to share.streamlit.io → **New app** → pick your `cfa-l2-tracker` repo, `app.py`.

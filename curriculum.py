@@ -122,6 +122,18 @@ REVIEW_LAGS = (3, 14, 45)
 
 TOPICS = list(TOPIC_WEIGHTS.keys())
 
+# Sub-reading workflow states (the Status dropdown). COMPLETE_STATES are the ones
+# that count as "content done" for section roll-up and realized-progress, and that
+# arm the spaced-review clock.
+STATUS_OPTIONS = [
+    "Not Started", "Reading in Process", "Reading Completed",
+    "Practice in Process", "Practice Complete", "Pending Review", "Reviewed",
+]
+COMPLETE_STATES = {"Practice Complete", "Pending Review", "Reviewed"}
+# Actively being worked (still shows on the agenda). Practice-Complete and beyond
+# drop off and only reappear through the review queue when a review is actually due.
+ACTIVE_STATES = {"Reading in Process", "Reading Completed", "Practice in Process"}
+
 
 # Schweser study sub-modules (171 total): (section_id, code, title).
 # section_id is the 1-based index into MODULES above. Extracted from the Schweser

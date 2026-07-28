@@ -138,8 +138,28 @@ submodules = Table(
     Column("notes", Text),
 )
 
+# Manual / logistics tasks that live on the agenda and can be ticked off (they
+# aren't sub-readings). Seeded with the pre-game checklist.
+checklist = Table(
+    "checklist", metadata,
+    Column("key", String, primary_key=True),
+    Column("label", String, nullable=False),
+    Column("note", String),
+    Column("sort", Integer),
+    Column("done", Boolean, nullable=False, default=False),
+    Column("done_date", Date),
+)
+
+SEED_CHECKLIST = [
+    ("materials", "Materials unlock — Aug 12, 2026", "get ready to start", 1),
+    ("register", "Set an early-registration reminder", "deadline ~Oct 14 · saves $350", 2),
+    ("calc", "Calculator ready (BA II Plus)", "dust it off / replace if flaky", 3),
+    ("freeze", "Freeze the tracker build before Aug 12", "then it's a study tool", 4),
+]
+
 SEED_SETTINGS = {
     "exam_date": "2027-05-18",          # placeholder until CFAI publishes May 2027 dates
+    "pregame_start": "2026-07-20",      # start of the pre-game runway segment
     "materials_date": "2026-08-12",     # registration + curriculum/QBank/mocks unlock
     "consolidation_start": "2027-02-03",  # content ends, full-curriculum buffer begins
     "mock_start": "2027-03-03",         # full-length timed mocks begin
@@ -191,6 +211,10 @@ def _init_db(seed: bool = True):
                 dict(section_id=s, code=c, name=n, status="Not Started",
                      r1_done=False, r2_done=False, r3_done=False)
                 for (s, c, n) in curr.SUBMODULES])
+        if conn.execute(select(func.count()).select_from(checklist)).scalar() == 0:
+            conn.execute(checklist.insert(), [
+                dict(key=k, label=l, note=n, sort=s, done=False)
+                for (k, l, n, s) in SEED_CHECKLIST])
         if conn.execute(select(func.count()).select_from(settings)).scalar() == 0:
             conn.execute(settings.insert(), [
                 dict(key=k, value=v) for k, v in SEED_SETTINGS.items()])
@@ -244,7 +268,8 @@ def _rollup_section(section_id: int):
     Keeps the modules table — which the Calendar, pace bars and agenda read — honest."""
     sub = pd.read_sql(select(submodules.c.status, submodules.c.date_completed)
                       .where(submodules.c.section_id == int(section_id)), engine)
-    n, done = len(sub), int((sub["status"] == "Done").sum())
+    n = len(sub)
+    done = int(sub["status"].isin(curr.COMPLETE_STATES).sum())
     started = int((sub["status"] != "Not Started").sum())
     if n and done == n:
         status = "Done"
@@ -258,12 +283,15 @@ def _rollup_section(section_id: int):
 
 
 def update_submodule(sub_id: int, **fields):
-    if fields.get("date_completed") and "status" not in fields:
-        fields["status"] = "Done"
     with engine.begin() as conn:
         conn.execute(submodules.update().where(submodules.c.id == int(sub_id)).values(**fields))
-        sec = conn.execute(select(submodules.c.section_id)
-                           .where(submodules.c.id == int(sub_id))).scalar()
+        sec, status, dc = conn.execute(
+            select(submodules.c.section_id, submodules.c.status, submodules.c.date_completed)
+            .where(submodules.c.id == int(sub_id))).first()
+        # reaching a complete state starts the spaced-review clock if not already dated
+        if status in curr.COMPLETE_STATES and dc is None:
+            conn.execute(submodules.update().where(submodules.c.id == int(sub_id))
+                         .values(date_completed=dt.date.today()))
     _rollup_section(sec)
 
 
@@ -308,7 +336,9 @@ def review_queue(as_of: dt.date = None) -> pd.DataFrame:
     per outstanding review (sub_id, topic, section, module, which review, due, overdue)."""
     as_of = as_of or dt.date.today()
     df = get_submodules_df()
-    done = df[df["date_completed"].notna()]
+    # a review only queues once the item is genuinely complete AND dated — a stray
+    # date on a still-in-progress row won't start the clock early.
+    done = df[df["date_completed"].notna() & df["status"].isin(curr.COMPLETE_STATES)]
     rows = []
     for _, r in done.iterrows():
         base = pd.to_datetime(r["date_completed"]).date()
@@ -346,6 +376,11 @@ def upsert_resource(name: str, data: bytes, updated_at: str):
             name=name, data=data, size=len(data), updated_at=updated_at))
 
 
+def delete_resource(name: str):
+    with engine.begin() as conn:
+        conn.execute(resources.delete().where(resources.c.name == name))
+
+
 def notes_versions() -> pd.DataFrame:
     return pd.read_sql(select(notes_doc.c.version, notes_doc.c.filename,
                               notes_doc.c.uploaded_at).order_by(notes_doc.c.version.desc()),
@@ -366,3 +401,18 @@ def add_notes(filename: str, data: bytes, uploaded_at: str):
     with engine.begin() as conn:
         conn.execute(notes_doc.insert().values(
             filename=filename, data=data, uploaded_at=uploaded_at))
+
+
+def delete_notes_version(version: int):
+    with engine.begin() as conn:
+        conn.execute(notes_doc.delete().where(notes_doc.c.version == int(version)))
+
+
+def get_checklist() -> pd.DataFrame:
+    return pd.read_sql(select(checklist).order_by(checklist.c.sort), engine)
+
+
+def set_checklist_done(key: str, done: bool, done_date=None):
+    with engine.begin() as conn:
+        conn.execute(checklist.update().where(checklist.c.key == key)
+                     .values(done=bool(done), done_date=done_date))

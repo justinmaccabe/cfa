@@ -60,7 +60,7 @@ span[data-testid="stIconMaterial"], [class*="material-symbols"], .material-icons
     font-feature-settings: "tnum" 1, "lnum" 1 !important;
 }}
 .stApp {{ background:#F5F7F6; }}
-.block-container {{ padding-top: 2.2rem; }}
+.block-container {{ padding-top: 3.6rem; }}
 #MainMenu, footer {{ visibility: hidden; }}
 
 /* --- sidebar brand ------------------------------------------------ */
@@ -95,6 +95,7 @@ h2, h3 {{ color:{INK}; border-left:3px solid {PRIMARY}; padding-left:.55rem; }}
 .dot {{ flex:0 0 auto; width:9px; height:9px; border-radius:50%; transform:translateY(1px); }}
 .agenda-item .meta {{ margin-left:auto; color:{MUTE}; font-size:.86rem; font-style:italic; white-space:nowrap; }}
 .agenda-empty {{ color:{MUTE}; font-style:italic; padding:.4rem 0; }}
+.agenda-head {{ display:flex; justify-content:space-between; align-items:baseline; margin:.1rem 0 .35rem; }}
 
 /* --- the exam runway (signature) --------------------------------- */
 .runway {{ position:relative; display:flex; height:36px; border-radius:8px; overflow:hidden;
@@ -108,6 +109,28 @@ h2, h3 {{ color:{INK}; border-left:3px solid {PRIMARY}; padding-left:.55rem; }}
     font-size:.58rem; letter-spacing:.12em; color:{INK}; background:#F5F7F6; padding:0 3px; }}
 .rw-ends {{ display:flex; justify-content:space-between; color:{MUTE}; font-size:.75rem;
     font-style:italic; margin-top:.5rem; }}
+/* runway legend (names + dates, always readable) */
+.rw-legend {{ display:flex; flex-wrap:wrap; gap:.35rem 1.1rem; margin-top:.6rem; font-size:.8rem; }}
+.rw-leg {{ color:{INK}; white-space:nowrap; }}
+.rw-leg b {{ color:{PRIMARY}; }}
+.rw-dot {{ display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:.35rem;
+    vertical-align:middle; }}
+.rw-legd {{ color:{MUTE}; font-style:italic; }}
+/* realized vs expected tracker */
+.rwp-line {{ font-size:.95rem; color:{INK}; margin-bottom:.35rem; }}
+.rwp {{ position:relative; height:12px; border-radius:7px; background:rgba(51,87,101,.12);
+    overflow:hidden; }}
+.rwp-fill {{ height:100%; background:{TEAL}; border-radius:7px 0 0 7px; }}
+.rwp-mark {{ position:absolute; top:-3px; bottom:-3px; width:2px; background:{INK}; }}
+.rwp + .runway {{ margin-top:.9rem; }}
+/* colour the agenda block: a slate header banner + a slate left edge on the box */
+.agenda-head {{ background:{PRIMARY} !important; border-radius:10px 10px 0 0 !important;
+    padding:.55rem .95rem !important; margin:.25rem 0 0 !important; align-items:center !important; }}
+.agenda-head .agenda-date {{ color:#FFFFFF !important; }}
+.agenda-head .agenda-tag {{ color:{LBLUE} !important; float:none !important; }}
+[data-testid="stVerticalBlockBorderWrapper"] {{ border-left:4px solid {PRIMARY} !important;
+    background:rgba(219,226,220,.28) !important; border-top-left-radius:0 !important;
+    border-top-right-radius:0 !important; }}
 
 [data-testid="stMetric"] {{ background:#FFFFFF; border:1px solid rgba(51,87,101,.18);
     border-radius:10px; padding:14px 18px; box-shadow:0 1px 2px rgba(51,87,101,.06); }}
@@ -175,6 +198,7 @@ def _d(key, default):
 
 
 exam_date = _d("exam_date", "2027-05-18")
+pregame_start = _d("pregame_start", "2026-07-20")
 materials_date = _d("materials_date", "2026-08-12")
 consolidation_start = _d("consolidation_start", "2027-02-03")
 mock_start = _d("mock_start", "2027-03-03")
@@ -182,8 +206,9 @@ taper_start = _d("taper_start", "2027-05-12")
 weekly_target = float(settings.get("weekly_hours_target", 12) or 12)
 days_to_exam = (exam_date - today).days
 
-# The runway phases (Foundation onward); pre-game is the lead-in before materials.
+# The runway phases, Pre-game through Taper.
 PHASES = [
+    ("Pre-game",      pregame_start,       materials_date,      "#A9B2B0"),
     ("Foundation",    materials_date,      consolidation_start, PRIMARY),
     ("Consolidation", consolidation_start, mock_start,          TEAL),
     ("Mocks",         mock_start,          taper_start,         BROWN),
@@ -242,8 +267,8 @@ with st.sidebar:
     <span class="side-phase">{phase} phase</span>
     <hr>
     """, unsafe_allow_html=True)
-    page = st.radio("Go to", ["Today", "Calendar", "Curriculum", "Reviews",
-                              "Drill Log", "Mocks", "Analytics", "Notes", "Resources"],
+    page = st.radio("Go to", ["Today", "Calendar", "Curriculum", "Notes", "Resources",
+                              "Reviews", "Drill Log", "Mocks", "Analytics"],
                     label_visibility="collapsed")
     st.markdown("<hr>", unsafe_allow_html=True)
     st.caption(f"{settings.get('candidate_name','')}  ·  target {weekly_target:.0f} h/wk")
@@ -256,95 +281,31 @@ def page_header(eyebrow, title):
 
 
 # ================================================================= TODAY
-def todays_agenda():
-    """Priority-ordered list of (color, text, meta) for the day."""
-    items = []
-    if phase == "Pre-game":
-        n = (materials_date - today).days
-        items.append((MUTE, f"Pre-game — official materials unlock in {n} days "
-                            f"({materials_date:%b %d}).", "logistics"))
-        items.append((PRIMARY, "Set an early-registration reminder — save $350 if you "
-                              "register by ~Oct 14.", "logistics"))
-        items.append((TEAL, "Calculator ready (BA II Plus); freeze the tracker before Aug 12.",
-                     "logistics"))
-        first = mods.sort_values(["study_order", "id"]).iloc[0]
-        items.append((PRIMARY, f"First up when content starts: {first['name']}",
-                     f"Quant · Book {int(first['book'])}"))
-        return items
-    # reviews first — spaced retrieval is the highest-leverage thing on any given day
-    if not queue.empty:
-        for _, r in queue.iterrows():
-            when = "overdue" if r["days_overdue"] > 0 else "due today"
-            items.append((BROWN, f"Review ({r['review']}): {r['module']}",
-                         f"{r['topic']} · {when}"))
-    # continue what's open
-    inprog = mods[mods["status"] == "In Progress"]
-    for _, r in inprog.iterrows():
-        items.append((TEAL, f"Continue: {r['name']}", f"{r['topic']} · Book {int(r['book'])}"))
-    # otherwise, point at the next module in our study order
-    if inprog.empty:
-        nxt = mods[mods["status"] == "Not Started"].sort_values(["study_order", "id"])
-        if not nxt.empty:
-            r = nxt.iloc[0]
-            items.append((PRIMARY, f"Start next: {r['name']}",
-                         f"{r['topic']} · Book {int(r['book'])}"))
-    return items
+def on_agenda_df():
+    """The sub-readings that belong on today's agenda — any with a review due, any in
+    progress, plus the next few not-started — as one editable slice of the curriculum.
+    Editing writes straight back to the sub-module, so whatever you fill in stays filled;
+    only the next review's checkbox is blank when the row reappears in 14/45 days."""
+    sub = db.get_submodules_df()
+    due_ids = list(dict.fromkeys(queue["sub_id"].tolist())) if not queue.empty else []
+    active_ids = sub[sub["status"].isin(curr.ACTIVE_STATES)]["id"].tolist()
+    nxt_ids = (sub[sub["status"] == "Not Started"].sort_values(["study_order", "id"])
+               ["id"].head(3).tolist())
+    order, seen = [], set()
+    for i in due_ids + active_ids + nxt_ids:
+        if i not in seen:
+            order.append(i)
+            seen.add(i)
+    if not order:
+        return sub.iloc[0:0]
+    df = sub[sub["id"].isin(order)].copy()
+    df["ord"] = df["id"].map({i: n for n, i in enumerate(order)})
+    return df.sort_values("ord")
 
 
-def runway_html():
-    total = max((exam_date - materials_date).days, 1)
-    segs = ""
-    for name, s, e, color in PHASES:
-        w = max((e - s).days, 0) / total * 100
-        segs += f'<div class="rw-seg" style="width:{w:.2f}%;background:{color}"><span>{name}</span></div>'
-    frac = (today - materials_date).days / total
-    frac = min(max(frac, 0), 1)
-    marker = f'<div class="rw-marker" style="left:{frac*100:.2f}%"></div>' if today >= materials_date else ""
-    return (f'<div class="runway">{segs}{marker}</div>'
-            f'<div class="rw-ends"><span>Materials · {materials_date:%b %d, %Y}</span>'
-            f'<span>Exam · {exam_date:%b %d, %Y}</span></div>')
-
-
-def page_today():
-    page_header("Daily brief", f"{today:%A}, {today:%B %-d}")
-
-    agenda = todays_agenda()
-    rows = ""
-    for color, text, meta in agenda:
-        rows += (f'<div class="agenda-item"><span class="dot" style="background:{color}"></span>'
-                 f'<span>{text}</span><span class="meta">{meta}</span></div>')
-    if not rows:
-        rows = '<div class="agenda-empty">Nothing queued — log a session or set a module in progress.</div>'
-    st.markdown(f"""
-    <div class="agenda">
-      <div><span class="agenda-date">On the agenda</span>
-      <span class="agenda-tag">{phase} phase</span></div>
-      {rows}
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.write("")
-    st.markdown("##### Exam runway")
-    st.markdown(runway_html(), unsafe_allow_html=True)
-
-    st.write("")
-    done = int((mods["status"] == "Done").sum())
-    in_prog = int((mods["status"] == "In Progress").sum())
-    week_start = today - dt.timedelta(days=today.weekday())
-    hrs_week = 0.0
-    if not log.empty:
-        lg = log.copy(); lg["date"] = pd.to_datetime(lg["date"]).dt.date
-        hrs_week = lg[lg["date"] >= week_start]["minutes"].sum() / 60
-    overdue = 0 if queue.empty else int((queue["days_overdue"] > 0).sum())
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Modules complete", f"{done} / 45", f"{done/45*100:.0f}%")
-    c2.metric("In progress", in_prog)
-    c3.metric("Hours this week", f"{hrs_week:.1f}", f"target {weekly_target:.0f}")
-    c4.metric("Reviews due", 0 if queue.empty else len(queue),
-              f"{overdue} overdue" if overdue else "on track", delta_color="inverse")
-
-    st.subheader("Pace by topic")
+def render_pace():
+    """Pace-by-topic bars (actual %) with ◆ markers for required-by-today. Lives on the
+    Calendar tab."""
     exp, ef = expected_progress()
     rows = []
     for t in curr.TOPICS:
@@ -364,7 +325,6 @@ def page_today():
                              hovertemplate="should be %{x:.0f}% by today<extra></extra>"))
     fig.update_xaxes(range=[0, 100])
     st.plotly_chart(_plotly(fig, 400), use_container_width=True)
-
     nmods = mods.groupby("topic")["id"].count().to_dict()
     exp_mods = sum(exp[t] * nmods.get(t, 0) for t in curr.TOPICS)
     done_mods = int((mods["status"] == "Done").sum())
@@ -372,12 +332,203 @@ def page_today():
     if ef <= 0:
         verdict = "content phase hasn't started — nothing required yet"
     elif gap >= -0.5:
-        verdict = f"on or ahead of pace (+{gap:.1f} modules)"
+        verdict = f"on or ahead of pace (+{gap:.1f} sections)"
     else:
-        verdict = f":red[{-gap:.1f} modules behind pace]"
+        verdict = f":red[{-gap:.1f} sections behind pace]"
     st.caption(f"**◆ = required progress by today** (paced from your plan). "
                f"Completed **{done_mods}** of 45; pace expects ~**{exp_mods:.1f}** → {verdict}.  \n"
                "Bar colour = Level I signal: brown below · slate at · teal above the candidate average.")
+
+
+def topic_schedule():
+    """Per-chapter (topic) expected completion date + on-track flag, from the same
+    weight-paced model as the runway. Ethics targets the end of the content window."""
+    span = max((consolidation_start - materials_date).days, 1)
+    seq = sorted([t for t in curr.TOPICS if curr.STUDY_ORDER.get(t, 50) < 90],
+                 key=lambda t: curr.STUDY_ORDER[t])
+    w = {t: sum(curr.TOPIC_WEIGHTS[t]) / 2 for t in seq}
+    tot = sum(w.values()) or 1
+    exp, _ = expected_progress()
+    sub = db.get_submodules_df()
+    out, c = [], 0.0
+    for t in seq + ["Ethics"]:
+        if t == "Ethics":
+            target = consolidation_start
+        else:
+            c += w[t] / tot
+            target = materials_date + dt.timedelta(days=round(c * span))
+        st_sub = sub[sub["topic"] == t]
+        done, tt = int(st_sub["status"].isin(curr.COMPLETE_STATES).sum()), len(st_sub)
+        dfrac = done / tt if tt else 0
+        out.append(dict(topic=t, target=target, done=done, tot=tt,
+                        on_track=dfrac >= exp.get(t, 0) - 0.05))
+    return out
+
+
+def current_chapter():
+    """The topic (chapter) currently being worked — first active sub-reading, else
+    the next not-started. Used as the agenda tag once studying is underway."""
+    sub = db.get_submodules_df().sort_values(["study_order", "id"])
+    active = sub[sub["status"].isin(curr.ACTIVE_STATES)]
+    if len(active):
+        return active.iloc[0]["topic"]
+    ns = sub[sub["status"] == "Not Started"]
+    return ns.iloc[0]["topic"] if len(ns) else "All reviewed"
+
+
+def runway_progress():
+    """Realized vs expected progress as *actual* values: realized = share of the 171
+    sub-readings actually complete; expected = the weight-paced target for today
+    (the real model, not a straight-line assumption)."""
+    sub = db.get_submodules_df()
+    n = len(sub) or 1
+    realized = int(sub["status"].isin(curr.COMPLETE_STATES).sum()) / n * 100
+    exp, _ = expected_progress()
+    cnt = sub.groupby("topic")["id"].count().to_dict()
+    expected = sum(exp.get(t, 0) * cnt.get(t, 0) for t in curr.TOPICS) / n * 100
+    return realized, expected
+
+
+def runway_html():
+    total = max((exam_date - pregame_start).days, 1)
+    segs = "".join(
+        f'<div class="rw-seg" style="width:{max((e - s).days, 0) / total * 100:.2f}%;'
+        f'background:{color}"></div>' for name, s, e, color in PHASES)
+    frac = min(max((today - pregame_start).days / total, 0), 1)
+    marker = f'<div class="rw-marker" style="left:{frac * 100:.2f}%"></div>'
+    legend = "".join(
+        f"<span class='rw-leg'><span class='rw-dot' style='background:{color}'></span>"
+        f"<b>{name}</b> <span class='rw-legd'>{s:%b %-d} – {e:%b %-d, %Y}</span></span>"
+        for name, s, e, color in PHASES)
+    r, e = runway_progress()
+    delta = r - e
+    if e < 0.5:
+        emoji, msg = "⚪", "the clock hasn't started — pre-game"
+    elif delta >= 0:
+        emoji, msg = "🟢", f"ahead of pace (+{delta:.0f} pts)"
+    elif delta >= -5:
+        emoji, msg = "🟡", f"a touch behind ({delta:.0f} pts)"
+    else:
+        emoji, msg = "🔴", f"behind pace ({delta:.0f} pts)"
+    tracker = (f"<div class='rwp-line'>🎯 Realized <b>{r:.0f}%</b> &nbsp;·&nbsp; "
+               f"◆ Expected <b>{e:.0f}%</b> &nbsp;&nbsp; {emoji} {msg}</div>"
+               f"<div class='rwp'><div class='rwp-fill' style='width:{r:.1f}%'></div>"
+               f"<div class='rwp-mark' style='left:{e:.1f}%'></div></div>")
+    return (tracker + f'<div class="runway">{segs}{marker}</div>'
+            f'<div class="rw-legend">{legend}</div>')
+
+
+def page_today():
+    page_header("Daily brief", f"{today:%A}, {today:%B %-d}")
+
+    started_any = (db.get_submodules_df()["status"] != "Not Started").any()
+    tag = current_chapter() if (started_any or today >= materials_date) else "Pre-game phase"
+    st.markdown(f"<div class='agenda-head'><span class='agenda-date'>📋 On the agenda</span>"
+                f"<span class='agenda-tag'>{tag}</span></div>", unsafe_allow_html=True)
+    with st.container(border=True):
+        cl = db.get_checklist()
+        todo = cl[~cl["done"].astype(bool)]
+        for _, t in todo.iterrows():
+            cc = st.columns([0.05, 0.95], vertical_alignment="center")
+            if cc[0].checkbox("x", key=f"cl_{t['key']}", label_visibility="collapsed"):
+                db.set_checklist_done(t["key"], True, today)
+                st.rerun()
+            cc[1].markdown(f"{t['label']}  \n:gray[{t['note']}]")
+
+        ag = on_agenda_df()
+        if ag.empty:
+            if todo.empty:
+                st.caption("Nothing on the agenda — you're all caught up. 🎯")
+        else:
+            if not todo.empty:
+                st.markdown("<hr style='border:none;border-top:1px dotted rgba(51,87,101,.2);"
+                            "margin:.5rem 0'>", unsafe_allow_html=True)
+            st.caption("Edit right here — status, performance, completion, R1–R3, notes. "
+                       "Saves to the Curriculum; whatever you leave blank stays blank when the "
+                       "row returns for its next review.")
+            show = ag[["id", "name", "status", "confidence",
+                       "date_completed", "r1_done", "r2_done", "r3_done", "notes"]].copy()
+            show["date_completed"] = pd.to_datetime(show["date_completed"]).dt.date
+            edited = st.data_editor(
+                show, width="stretch", hide_index=True, key="agenda_editor",
+                column_config={
+                    "id": None,
+                    "name": st.column_config.TextColumn("Sub-reading", disabled=True, width="large"),
+                    "status": st.column_config.SelectboxColumn(
+                        "Status", options=curr.STATUS_OPTIONS, width="medium"),
+                    "confidence": st.column_config.NumberColumn(
+                        "Performance on Questions", min_value=0, max_value=100, step=1,
+                        format="%d%%", width="small"),
+                    "date_completed": st.column_config.DateColumn("Completed", width="small"),
+                    "r1_done": st.column_config.CheckboxColumn("R1", width="small"),
+                    "r2_done": st.column_config.CheckboxColumn("R2", width="small"),
+                    "r3_done": st.column_config.CheckboxColumn("R3", width="small"),
+                    "notes": st.column_config.TextColumn("Notes", width="medium"),
+                })
+            if st.button("Save agenda", type="primary", key="save_agenda"):
+                orig, n = show.set_index("id"), 0
+                for _, r in edited.iterrows():
+                    o, ch = orig.loc[r["id"]], {}
+                    for col in ["status", "confidence", "date_completed", "notes",
+                                "r1_done", "r2_done", "r3_done"]:
+                        new, old = r[col], o[col]
+                        if pd.isna(new) and pd.isna(old):
+                            continue
+                        if new != old:
+                            ch[col] = (None if pd.isna(new)
+                                       else bool(new) if col.startswith("r") else new)
+                    if ch:
+                        db.update_submodule(int(r["id"]), **ch)
+                        n += 1
+                st.success(f"Saved {n} change(s).")
+                st.rerun()
+
+    st.write("")
+    st.markdown("##### Exam runway")
+    st.markdown(runway_html(), unsafe_allow_html=True)
+
+    st.write("")
+    done = int((mods["status"] == "Done").sum())
+    in_prog = int((mods["status"] == "In Progress").sum())
+    week_start = today - dt.timedelta(days=today.weekday())
+    hrs_week = 0.0
+    if not log.empty:
+        lg = log.copy(); lg["date"] = pd.to_datetime(lg["date"]).dt.date
+        hrs_week = lg[lg["date"] >= week_start]["minutes"].sum() / 60
+    overdue = 0 if queue.empty else int((queue["days_overdue"] > 0).sum())
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Sections complete", f"{done} / 45", f"{done/45*100:.0f}%")
+    c2.metric("In progress", in_prog)
+    c3.metric("Hours this week", f"{hrs_week:.1f}", f"target {weekly_target:.0f}")
+    c4.metric("Reviews due", 0 if queue.empty else len(queue),
+              f"{overdue} overdue" if overdue else "on track", delta_color="inverse")
+
+    st.markdown("<hr class='page-rule'>", unsafe_allow_html=True)
+    st.subheader("Schedule")
+    cA, cB = st.columns([1, 1])
+    with cA:
+        st.markdown("**Due this week**")
+        ev = build_events()
+        wk = sorted((d, k, t) for d, its in ev.items() for k, t in its
+                    if today <= d <= today + dt.timedelta(days=7))
+        q7 = db.review_queue(today + dt.timedelta(days=7))
+        shown = False
+        for d, k, t in wk:
+            st.markdown(f":gray[{d:%a %b %-d}] · {t}")
+            shown = True
+        if not q7.empty:
+            for _, r in q7.iterrows():
+                st.markdown(f":gray[{r['due']:%a %b %-d}] · Review {r['review']} · {r['module']}")
+                shown = True
+        if not shown:
+            st.caption("Nothing due in the next 7 days.")
+    with cB:
+        st.markdown("**Chapter pace — expected completion**")
+        for row in topic_schedule():
+            badge = ":green[on track]" if row["on_track"] else ":red[behind]"
+            st.markdown(f"**{row['topic']}** · target {row['target']:%b %-d, %Y} · {badge}")
+            st.markdown(_bar(row["done"], row["tot"]), unsafe_allow_html=True)
 
 
 # ================================================================= CURRICULUM
@@ -396,16 +547,18 @@ def section_dialog(sec_id, sec_name, topic):
             "code": st.column_config.TextColumn("#", disabled=True, width="small"),
             "name": st.column_config.TextColumn("Sub-reading", disabled=True, width="large"),
             "status": st.column_config.SelectboxColumn(
-                "Status", options=["Not Started", "In Progress", "Done"], width="small"),
-            "confidence": st.column_config.NumberColumn("Conf", min_value=1, max_value=5, step=1, width="small"),
+                "Status", options=curr.STATUS_OPTIONS, width="medium"),
+            "confidence": st.column_config.NumberColumn(
+                "Performance on Questions", min_value=0, max_value=100, step=1,
+                format="%d%%", width="small"),
             "date_completed": st.column_config.DateColumn("Completed", width="small"),
             "r1_done": st.column_config.CheckboxColumn("R1", width="small"),
             "r2_done": st.column_config.CheckboxColumn("R2", width="small"),
             "r3_done": st.column_config.CheckboxColumn("R3", width="small"),
             "notes": st.column_config.TextColumn("Notes", width="medium"),
         })
-    st.caption("Completing a sub-reading arms its +3 / +14 / +45-day reviews (Reviews tab); "
-               "R1–R3 tick them off. Section progress rolls up automatically.")
+    st.caption("Reaching **Practice Complete** (or beyond) arms the +3 / +14 / +45-day reviews "
+               "(Reviews tab); R1–R3 tick them off. Section progress rolls up automatically.")
     if st.button("Save", type="primary", key=f"savesub_{sec_id}"):
         orig, n = show.set_index("id"), 0
         for _, r in edited.iterrows():
@@ -432,7 +585,10 @@ def _bar(done, tot):
 
 
 def page_curriculum():
-    page_header("The map", "Curriculum · 45 sections → 171 sub-readings")
+    n_ch, n_sec, n_sub = len(curr.TOPICS), len(curr.MODULES), len(curr.SUBMODULES)
+    page_header("The map",
+                f"Curriculum <i style='font-weight:400;font-size:1.35rem;color:{MUTE}'>"
+                f"· {n_ch} Chapters · {n_sec} Sections · {n_sub} Sub-Readings</i>")
     st.caption("Each row is a section. **Open** it to check off its Schweser sub-readings — "
                "section progress, the calendar and the pace bars all roll up from what you do there.")
     subs_all = db.get_submodules_df()
@@ -444,7 +600,7 @@ def page_curriculum():
             st.markdown(f"<div class='cur-topic' style='border-color:{SIGNAL_COLOR[sig]}'>"
                         f"{cur_topic}</div>", unsafe_allow_html=True)
         sub = subs_all[subs_all["section_id"] == s["id"]]
-        done, tot = int((sub["status"] == "Done").sum()), len(sub)
+        done, tot = int(sub["status"].isin(curr.COMPLETE_STATES).sum()), len(sub)
         c = st.columns([0.7, 6, 2, 1.3], vertical_alignment="center")
         c[0].markdown(f"<span class='cur-bk'>Bk {int(s['book'])}</span>", unsafe_allow_html=True)
         c[1].markdown(f"**{s['name']}**")
@@ -676,6 +832,10 @@ def month_html(year, month, ev):
 
 def page_calendar():
     page_header("The plan, day by day", "Calendar")
+    st.subheader("Pace by topic")
+    render_pace()
+    st.markdown("<hr class='page-rule'>", unsafe_allow_html=True)
+    st.subheader("Month view")
     ev = build_events()
     months, y, m = [], today.year, today.month
     while (y, m) <= (exam_date.year, exam_date.month):
@@ -684,11 +844,11 @@ def page_calendar():
     labels = [dt.date(yy, mm, 1).strftime("%B %Y") for (yy, mm) in months]
     sel = st.selectbox("Month", range(len(months)), format_func=lambda k: labels[k])
     st.markdown(
-        f'<div style="margin:.1rem 0;font-size:.75rem;color:{MUTE}">'
-        f'<span class="chip study" style="display:inline-block">study</span> '
-        f'<span class="chip review" style="display:inline-block">review</span> '
-        f'<span class="chip mock" style="display:inline-block">mock</span> '
-        f'<span class="chip mile" style="display:inline-block">milestone</span></div>',
+        f'<div style="margin:.1rem 0;font-size:.75rem">'
+        f'<span class="chip study" style="display:inline-block;color:#FFFFFF">study</span> '
+        f'<span class="chip review" style="display:inline-block;color:#FFFFFF">review</span> '
+        f'<span class="chip mock" style="display:inline-block;color:#FFFFFF">mock</span> '
+        f'<span class="chip mile" style="display:inline-block;color:#FFFFFF">milestone</span></div>',
         unsafe_allow_html=True)
     yy, mm = months[sel]
     st.markdown(month_html(yy, mm, ev), unsafe_allow_html=True)
@@ -731,19 +891,37 @@ DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.docu
 
 
 # ================================================================= NOTES (living Word doc)
+def _notes_filename(now=None):
+    """Filenames are always stamped with the save time, whatever the upload was called:
+    CFA-L2-Notes-YYYY-MM-DD-HH-MM.docx."""
+    now = now or dt.datetime.now()
+    return f"CFA-L2-Notes-{now:%Y-%m-%d-%H-%M}.docx"
+
+
 def _starter_docx() -> bytes:
     from docx import Document
+    from docx.shared import RGBColor
+    accent = RGBColor(0x5E, 0x7E, 0x86)   # muted slate-teal for sub-reading bullets
     doc = Document()
     doc.add_heading("CFA Level II — Study Notes", 0)
-    doc.add_paragraph("Living notes: download → edit in Word → upload to override. "
-                      "The app keeps every version.")
-    last = None
-    for _, r in mods.sort_values(["study_order", "id"]).iterrows():
-        if r["topic"] != last:
-            doc.add_heading(r["topic"], level=1)
-            last = r["topic"]
-        doc.add_heading(r["name"], level=2)
-        doc.add_paragraph("")
+    doc.add_paragraph("Living notes. Each topic is a chapter — open Word's Navigation Pane "
+                      "(View ▸ Navigation Pane) to jump straight to any topic. Each module "
+                      "lists its Schweser sub-readings; write your notes beneath them.")
+    subs = db.get_submodules_df()
+    last_topic = None
+    for _, s in mods.sort_values(["study_order", "id"]).iterrows():
+        if s["topic"] != last_topic:
+            if last_topic is not None:
+                doc.add_page_break()
+            doc.add_heading(s["topic"], level=1)        # chapter -> Navigation Pane
+            last_topic = s["topic"]
+        doc.add_heading(s["name"], level=2)             # module
+        for _, sm in subs[subs["section_id"] == s["id"]].iterrows():
+            p = doc.add_paragraph(style="List Bullet")
+            run = p.add_run(f"{sm['code']}   {sm['name']}")
+            run.font.color.rgb = accent
+            run.italic = True
+        doc.add_paragraph("")                           # room to write
     buf = BytesIO()
     doc.save(buf)
     return buf.getvalue()
@@ -755,21 +933,22 @@ def page_notes():
         return
     fname, data = db.get_notes()
     st.caption("Your living notes doc. **Download** it, edit in Word, then **upload** to "
-               "override — every session builds on the last, on any computer. Past versions "
-               "are kept as a safety net.")
+               "override — every session builds on the last, on any computer. Each save is "
+               "stamped and kept in the history below as a safety net.")
     c1, c2 = st.columns([1, 1])
     if data:
         c1.download_button(f"⬇  Download current · {fname}", data=data, file_name=fname,
                            mime=DOCX_MIME, width="stretch")
     else:
         if c1.button("Generate starter doc", type="primary", width="stretch"):
-            db.add_notes("CFA-L2-Notes.docx", _starter_docx(),
-                         dt.datetime.now().isoformat(timespec="minutes"))
+            now = dt.datetime.now()
+            db.add_notes(_notes_filename(now), _starter_docx(), now.isoformat(timespec="minutes"))
             st.success("Starter doc created — download it below.")
             st.rerun()
     up = st.file_uploader("Upload a new version (overrides current)", type=["docx"])
     if up is not None and c2.button("Save as current version", type="primary", width="stretch"):
-        db.add_notes(up.name, up.getvalue(), dt.datetime.now().isoformat(timespec="minutes"))
+        now = dt.datetime.now()
+        db.add_notes(_notes_filename(now), up.getvalue(), now.isoformat(timespec="minutes"))
         st.success("Saved — this is now your current version.")
         st.rerun()
 
@@ -778,12 +957,16 @@ def page_notes():
         st.markdown("<hr class='page-rule'>", unsafe_allow_html=True)
         st.markdown("##### Version history")
         for _, v in vers.iterrows():
-            cols = st.columns([3, 2, 1.5])
-            cols[0].write(f"**v{int(v['version'])}** · {v['filename']}")
-            cols[1].write(f":gray[{str(v['uploaded_at']).replace('T', ' ')}]")
+            cols = st.columns([0.6, 4.2, 2, 1.3, 1.1], vertical_alignment="center")
+            cols[0].markdown(f"**v{int(v['version'])}**")
+            cols[1].write(v["filename"])
+            cols[2].write(f":gray[{str(v['uploaded_at']).replace('T', ' ')}]")
             _, vdata = db.get_notes(int(v["version"]))
-            cols[2].download_button("Download", data=vdata, file_name=v["filename"],
-                                    key=f"nv_{v['version']}", mime=DOCX_MIME)
+            cols[3].download_button("Download", data=vdata, file_name=v["filename"],
+                                    key=f"nv_{v['version']}", mime=DOCX_MIME, width="stretch")
+            if cols[4].button("Delete", key=f"nvdel_{v['version']}", width="stretch"):
+                db.delete_notes_version(int(v["version"]))
+                st.rerun()
 
 
 # ================================================================= RESOURCES
@@ -791,6 +974,12 @@ def page_notes():
 # Postgres and stay behind your password. Personal cross-device access only.
 RESOURCES_DIR = os.environ.get("CFA_RESOURCES_DIR", os.path.expanduser("~/Desktop/CFA"))
 RESOURCE_EXTS = (".pdf", ".xlsx", ".xlsm", ".csv", ".png", ".jpg", ".jpeg")
+# Tidy up messy source filenames on the way into the app (download-facing names).
+PRETTY_NAMES = {
+    "CFA_L2_Study_Planner_2.xlsx": "CFA L2 Study Planner.xlsx",
+    "aug 2025.png": "CFA Level I - Result (Aug 2025).png",
+    "may 2026.png": "CFA Level I - Result (May 2026, Pass).png",
+}
 _MIMES = {".pdf": "application/pdf",
           ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
@@ -842,8 +1031,9 @@ def page_resources():
                      if f.lower().endswith(RESOURCE_EXTS)]
             now = dt.datetime.now().isoformat(timespec="minutes")
             for f in files:
+                base = os.path.basename(f)
                 with open(f, "rb") as fh:
-                    db.upsert_resource(os.path.basename(f), fh.read(), now)
+                    db.upsert_resource(PRETTY_NAMES.get(base, base), fh.read(), now)
             st.success(f"Loaded {len(files)} file(s) into the app database.")
             st.rerun()
     elif have.empty:
