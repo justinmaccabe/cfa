@@ -21,6 +21,7 @@ from sqlalchemy.exc import OperationalError
 import curriculum as curr
 
 READINGS_SEED_OK = True   # sentinel for app.py's stale-module reload guard
+CURRICULUM_VERSION = "2-readings"   # bump on any structural change to force a re-seed
 
 
 def _database_url():
@@ -200,6 +201,17 @@ def _init_db(seed: bool = True):
     if not seed:
         return
     with engine.begin() as conn:
+        # Curriculum-version stamp: when the structure changes (e.g. 45 sections ->
+        # 42 readings), wipe the curriculum tables so they re-seed — otherwise a DB
+        # from a prior deploy keeps the old rows and the app renders stale content.
+        ver = conn.execute(select(settings.c.value)
+                           .where(settings.c.key == "curriculum_version")).scalar()
+        if ver != CURRICULUM_VERSION:
+            conn.execute(submodules.delete())
+            conn.execute(modules.delete())
+            conn.execute(settings.delete().where(settings.c.key == "curriculum_version"))
+            conn.execute(settings.insert().values(
+                key="curriculum_version", value=CURRICULUM_VERSION))
         if conn.execute(select(func.count()).select_from(modules)).scalar() == 0:
             conn.execute(modules.insert(), [
                 dict(id=i + 1, topic=t, name=title, book=bk, reading=rd,
