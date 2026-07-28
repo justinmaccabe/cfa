@@ -183,6 +183,11 @@ h2, h3 {{ color:{INK}; border-left:3px solid {PRIMARY}; padding-left:.55rem; }}
     box-shadow:0 1px 2px rgba(51,87,101,.06); }}
 .rescard .rc-name {{ color:{INK}; font-weight:700; font-size:1.02rem; }}
 .rescard .rc-meta {{ color:{MUTE}; font-size:.8rem; letter-spacing:.04em; }}
+
+/* gentle button polish */
+.stButton > button {{ transition: border-color .12s ease, color .12s ease, box-shadow .12s ease; }}
+.stButton > button:hover {{ border-color:{PRIMARY}; color:{PRIMARY};
+    box-shadow:0 1px 5px rgba(51,87,101,.14); }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -460,7 +465,8 @@ def page_today():
                 cc = st.columns([6.2, 2.6, 0.7], vertical_alignment="center")
                 if cc[0].button(r["name"], key=f"ag_open_{r['id']}", width="stretch"):
                     section_dialog(int(r["id"]), r["name"], r["topic"])
-                cc[1].markdown(f":gray[{r['topic']} · {why}]")
+                cc[1].markdown(f"<span style='color:{PRIMARY};font-style:italic'>"
+                               f"{r['topic']} · {why}</span>", unsafe_allow_html=True)
                 if cc[2].checkbox("done", key=f"ag_clr_{r['id']}", label_visibility="collapsed"):
                     if has_due:
                         db.update_module(int(r["id"]),
