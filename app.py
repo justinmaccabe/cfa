@@ -14,6 +14,7 @@ import calendar
 import datetime as dt
 import glob
 import hashlib
+import importlib
 import os
 import re
 from io import BytesIO
@@ -26,6 +27,13 @@ import streamlit.components.v1 as components
 
 import curriculum as curr
 import db
+
+# Streamlit Cloud keeps a warm process: app.py re-runs on each deploy but sibling
+# modules can stay stale in sys.modules, so a newly-added db/curr symbol raises
+# AttributeError until reboot. Reload them if a recent symbol is missing.
+if not hasattr(db, "READINGS_SEED_OK") or not hasattr(curr, "READINGS"):
+    importlib.reload(curr)
+    importlib.reload(db)
 
 st.set_page_config(page_title="CFA Level II — Study Tracker",
                    page_icon="◆", layout="wide", initial_sidebar_state="expanded")
@@ -286,19 +294,18 @@ def on_agenda_df():
     progress, plus the next few not-started — as one editable slice of the curriculum.
     Editing writes straight back to the sub-module, so whatever you fill in stays filled;
     only the next review's checkbox is blank when the row reappears in 14/45 days."""
-    sub = db.get_submodules_df()
-    due_ids = list(dict.fromkeys(queue["sub_id"].tolist())) if not queue.empty else []
-    active_ids = sub[sub["status"].isin(curr.ACTIVE_STATES)]["id"].tolist()
-    nxt_ids = (sub[sub["status"] == "Not Started"].sort_values(["study_order", "id"])
-               ["id"].head(3).tolist())
+    m = db.get_modules_df().sort_values(["study_order", "id"])
+    due_ids = list(dict.fromkeys(queue["reading_id"].tolist())) if not queue.empty else []
+    active_ids = m[m["status"] == "In Progress"]["id"].tolist()
+    nxt_ids = m[m["status"] == "Not Started"]["id"].head(3).tolist()
     order, seen = [], set()
     for i in due_ids + active_ids + nxt_ids:
         if i not in seen:
             order.append(i)
             seen.add(i)
     if not order:
-        return sub.iloc[0:0]
-    df = sub[sub["id"].isin(order)].copy()
+        return m.iloc[0:0]
+    df = m[m["id"].isin(order)].copy()
     df["ord"] = df["id"].map({i: n for n, i in enumerate(order)})
     return df.sort_values("ord")
 
@@ -336,7 +343,7 @@ def render_pace():
     else:
         verdict = f":red[{-gap:.1f} sections behind pace]"
     st.caption(f"**◆ = required progress by today** (paced from your plan). "
-               f"Completed **{done_mods}** of 45; pace expects ~**{exp_mods:.1f}** → {verdict}.  \n"
+               f"Completed **{done_mods}** of 42; pace expects ~**{exp_mods:.1f}** → {verdict}.  \n"
                "Bar colour = Level I signal: brown below · slate at · teal above the candidate average.")
 
 
@@ -349,7 +356,7 @@ def topic_schedule():
     w = {t: sum(curr.TOPIC_WEIGHTS[t]) / 2 for t in seq}
     tot = sum(w.values()) or 1
     exp, _ = expected_progress()
-    sub = db.get_submodules_df()
+    m = db.get_modules_df()          # readings
     out, c = [], 0.0
     for t in seq + ["Ethics"]:
         if t == "Ethics":
@@ -357,8 +364,8 @@ def topic_schedule():
         else:
             c += w[t] / tot
             target = materials_date + dt.timedelta(days=round(c * span))
-        st_sub = sub[sub["topic"] == t]
-        done, tt = int(st_sub["status"].isin(curr.COMPLETE_STATES).sum()), len(st_sub)
+        st_sub = m[m["topic"] == t]
+        done, tt = int((st_sub["status"] == "Done").sum()), len(st_sub)
         dfrac = done / tt if tt else 0
         out.append(dict(topic=t, target=target, done=done, tot=tt,
                         on_track=dfrac >= exp.get(t, 0) - 0.05))
@@ -368,23 +375,23 @@ def topic_schedule():
 def current_chapter():
     """The topic (chapter) currently being worked — first active sub-reading, else
     the next not-started. Used as the agenda tag once studying is underway."""
-    sub = db.get_submodules_df().sort_values(["study_order", "id"])
-    active = sub[sub["status"].isin(curr.ACTIVE_STATES)]
+    m = db.get_modules_df().sort_values(["study_order", "id"])
+    active = m[m["status"] == "In Progress"]
     if len(active):
         return active.iloc[0]["topic"]
-    ns = sub[sub["status"] == "Not Started"]
+    ns = m[m["status"] == "Not Started"]
     return ns.iloc[0]["topic"] if len(ns) else "All reviewed"
 
 
 def runway_progress():
-    """Realized vs expected progress as *actual* values: realized = share of the 171
-    sub-readings actually complete; expected = the weight-paced target for today
-    (the real model, not a straight-line assumption)."""
-    sub = db.get_submodules_df()
-    n = len(sub) or 1
-    realized = int(sub["status"].isin(curr.COMPLETE_STATES).sum()) / n * 100
+    """Realized vs expected progress as *actual* values: realized = share of the 42
+    readings actually complete; expected = the weight-paced target for today (the
+    real model, not a straight-line assumption)."""
+    m = db.get_modules_df()
+    n = len(m) or 1
+    realized = int((m["status"] == "Done").sum()) / n * 100
     exp, _ = expected_progress()
-    cnt = sub.groupby("topic")["id"].count().to_dict()
+    cnt = m.groupby("topic")["id"].count().to_dict()
     expected = sum(exp.get(t, 0) * cnt.get(t, 0) for t in curr.TOPICS) / n * 100
     return realized, expected
 
@@ -443,45 +450,25 @@ def page_today():
             if not todo.empty:
                 st.markdown("<hr style='border:none;border-top:1px dotted rgba(51,87,101,.2);"
                             "margin:.5rem 0'>", unsafe_allow_html=True)
-            st.caption("Edit right here — status, performance, completion, R1–R3, notes. "
-                       "Saves to the Curriculum; whatever you leave blank stays blank when the "
-                       "row returns for its next review.")
-            show = ag[["id", "name", "status", "confidence",
-                       "date_completed", "r1_done", "r2_done", "r3_done", "notes"]].copy()
-            show["date_completed"] = pd.to_datetime(show["date_completed"]).dt.date
-            edited = st.data_editor(
-                show, width="stretch", hide_index=True, key="agenda_editor",
-                column_config={
-                    "id": None,
-                    "name": st.column_config.TextColumn("Sub-reading", disabled=True, width="large"),
-                    "status": st.column_config.SelectboxColumn(
-                        "Status", options=curr.STATUS_OPTIONS, width="medium"),
-                    "confidence": st.column_config.NumberColumn(
-                        "Performance on Questions", min_value=0, max_value=100, step=1,
-                        format="%d%%", width="small"),
-                    "date_completed": st.column_config.DateColumn("Completed", width="small"),
-                    "r1_done": st.column_config.CheckboxColumn("R1", width="small"),
-                    "r2_done": st.column_config.CheckboxColumn("R2", width="small"),
-                    "r3_done": st.column_config.CheckboxColumn("R3", width="small"),
-                    "notes": st.column_config.TextColumn("Notes", width="medium"),
-                })
-            if st.button("Save agenda", type="primary", key="save_agenda"):
-                orig, n = show.set_index("id"), 0
-                for _, r in edited.iterrows():
-                    o, ch = orig.loc[r["id"]], {}
-                    for col in ["status", "confidence", "date_completed", "notes",
-                                "r1_done", "r2_done", "r3_done"]:
-                        new, old = r[col], o[col]
-                        if pd.isna(new) and pd.isna(old):
-                            continue
-                        if new != old:
-                            ch[col] = (None if pd.isna(new)
-                                       else bool(new) if col.startswith("r") else new)
-                    if ch:
-                        db.update_submodule(int(r["id"]), **ch)
-                        n += 1
-                st.success(f"Saved {n} change(s).")
-                st.rerun()
+            st.caption("Click a reading to open its modules · Key Concepts · Module Quiz. "
+                       "The box on the right clears it from here once you're done.")
+            for _, r in ag.iterrows():
+                due = queue[queue["reading_id"] == r["id"]] if not queue.empty else None
+                has_due = due is not None and len(due)
+                why = (f"review {due.iloc[0]['review']} due" if has_due
+                       else ("in progress" if r["status"] == "In Progress" else "up next"))
+                cc = st.columns([6.2, 2.6, 0.7], vertical_alignment="center")
+                if cc[0].button(r["name"], key=f"ag_open_{r['id']}", width="stretch"):
+                    section_dialog(int(r["id"]), r["name"], r["topic"])
+                cc[1].markdown(f":gray[{r['topic']} · {why}]")
+                if cc[2].checkbox("done", key=f"ag_clr_{r['id']}", label_visibility="collapsed"):
+                    if has_due:
+                        db.update_module(int(r["id"]),
+                                         **{f"{due.iloc[0]['review'].lower()}_done": True})
+                    else:
+                        for sid in db.submodules_for_section(int(r["id"]))["id"]:
+                            db.update_submodule(int(sid), status="Practice Complete")
+                    st.rerun()
 
     st.write("")
     st.markdown("##### Exam runway")
@@ -498,7 +485,7 @@ def page_today():
     overdue = 0 if queue.empty else int((queue["days_overdue"] > 0).sum())
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Sections complete", f"{done} / 45", f"{done/45*100:.0f}%")
+    c1.metric("Readings complete", f"{done} / 42", f"{done/42*100:.0f}%")
     c2.metric("In progress", in_prog)
     c3.metric("Hours this week", f"{hrs_week:.1f}", f"target {weekly_target:.0f}")
     c4.metric("Reviews due", 0 if queue.empty else len(queue),
@@ -532,48 +519,44 @@ def page_today():
 
 
 # ================================================================= CURRICULUM
-@st.dialog("Sub-readings", width="large")
+@st.dialog("Reading", width="large")
 def section_dialog(sec_id, sec_name, topic):
     st.markdown(f"<span class='page-eyebrow'>{topic}</span><br><b>{sec_name}</b>",
                 unsafe_allow_html=True)
     subs = db.submodules_for_section(sec_id)
-    show = subs[["id", "code", "name", "status", "confidence", "date_completed",
-                 "r1_done", "r2_done", "r3_done", "notes"]].copy()
-    show["date_completed"] = pd.to_datetime(show["date_completed"]).dt.date
+    show = subs[["id", "code", "name", "status", "confidence", "notes"]].copy()
     edited = st.data_editor(
         show, width="stretch", hide_index=True, key=f"subed_{sec_id}",
         column_config={
             "id": None,
             "code": st.column_config.TextColumn("#", disabled=True, width="small"),
-            "name": st.column_config.TextColumn("Sub-reading", disabled=True, width="large"),
+            "name": st.column_config.TextColumn("Item", disabled=True, width="large"),
             "status": st.column_config.SelectboxColumn(
-                "Status", options=curr.STATUS_OPTIONS, width="medium"),
+                "Status", options=curr.ITEM_STATUS_OPTIONS, width="medium"),
             "confidence": st.column_config.NumberColumn(
-                "Performance on Questions", min_value=0, max_value=100, step=1,
-                format="%d%%", width="small"),
-            "date_completed": st.column_config.DateColumn("Completed", width="small"),
-            "r1_done": st.column_config.CheckboxColumn("R1", width="small"),
-            "r2_done": st.column_config.CheckboxColumn("R2", width="small"),
-            "r3_done": st.column_config.CheckboxColumn("R3", width="small"),
-            "notes": st.column_config.TextColumn("Notes", width="medium"),
+                "Perf %", min_value=0, max_value=100, step=1, format="%d%%", width="small"),
+            "notes": st.column_config.TextColumn("Notes", width="large"),
         })
-    st.caption("Reaching **Practice Complete** (or beyond) arms the +3 / +14 / +45-day reviews "
-               "(Reviews tab); R1–R3 tick them off. Section progress rolls up automatically.")
+    st.caption("When every item reaches **Practice Complete**, the reading is done and its "
+               "+3 / +14 / +45-day reviews arm (Reviews tab). **Module Quiz** performance flows "
+               "to the Drill Log → Analytics.")
     if st.button("Save", type="primary", key=f"savesub_{sec_id}"):
         orig, n = show.set_index("id"), 0
         for _, r in edited.iterrows():
             o, ch = orig.loc[r["id"]], {}
-            for col in ["status", "confidence", "date_completed", "notes",
-                        "r1_done", "r2_done", "r3_done"]:
+            for col in ["status", "confidence", "notes"]:
                 new, old = r[col], o[col]
                 if pd.isna(new) and pd.isna(old):
                     continue
                 if new != old:
-                    ch[col] = (None if pd.isna(new)
-                               else bool(new) if col.startswith("r") else new)
+                    ch[col] = None if pd.isna(new) else new
             if ch:
                 db.update_submodule(int(r["id"]), **ch)
                 n += 1
+                if r["name"] == "Module Quiz" and "confidence" in ch and pd.notna(r["confidence"]):
+                    db.log_study(today, topic, "Practice", num_q=100,
+                                 num_correct=int(r["confidence"]), source="Module Quiz",
+                                 notes=sec_name)
         st.success(f"Saved {n} change(s).")
         st.rerun()
 
@@ -585,12 +568,12 @@ def _bar(done, tot):
 
 
 def page_curriculum():
-    n_ch, n_sec, n_sub = len(curr.TOPICS), len(curr.MODULES), len(curr.SUBMODULES)
+    n_ch, n_read, n_items = len(curr.TOPICS), len(curr.READINGS), len(curr.ITEMS)
     page_header("The map",
                 f"Curriculum <i style='font-weight:400;font-size:1.35rem;color:{MUTE}'>"
-                f"· {n_ch} Chapters · {n_sec} Sections · {n_sub} Sub-Readings</i>")
-    st.caption("Each row is a section. **Open** it to check off its Schweser sub-readings — "
-               "section progress, the calendar and the pace bars all roll up from what you do there.")
+                f"· {n_ch} Chapters · {n_read} Readings · {n_items} Items</i>")
+    st.caption("Each row is a reading. **Open** it to check off its modules, Key Concepts and "
+               "Module Quiz — reading progress, the calendar and the pace bars all roll up from there.")
     subs_all = db.get_submodules_df()
     cur_topic = None
     for _, s in mods.sort_values(["study_order", "id"]).iterrows():
@@ -600,7 +583,7 @@ def page_curriculum():
             st.markdown(f"<div class='cur-topic' style='border-color:{SIGNAL_COLOR[sig]}'>"
                         f"{cur_topic}</div>", unsafe_allow_html=True)
         sub = subs_all[subs_all["section_id"] == s["id"]]
-        done, tot = int(sub["status"].isin(curr.COMPLETE_STATES).sum()), len(sub)
+        done, tot = int(sub["status"].isin(curr.ITEM_COMPLETE).sum()), len(sub)
         c = st.columns([0.7, 6, 2, 1.3], vertical_alignment="center")
         c[0].markdown(f"<span class='cur-bk'>Bk {int(s['book'])}</span>", unsafe_allow_html=True)
         c[1].markdown(f"**{s['name']}**")
@@ -612,23 +595,34 @@ def page_curriculum():
 # ================================================================= REVIEWS
 def page_reviews():
     page_header("Spaced retrieval", "Review queue")
-    st.caption("Reviews = practice questions from memory, then check — not a re-read. "
-               "Tracked per sub-reading; mark done as you clear them.")
+    st.caption("Reviews are **retrieval practice**, not re-reading. Mark done as you clear them.")
+    with st.expander("How to run a review — what the evidence says"):
+        st.markdown(
+            "1. **Closed-book first.** Do a set of practice questions / blue-box problems on "
+            "this reading *from memory* — no notes open. This is the part that builds durable "
+            "recall (Roediger & Karpicke; Dunlosky rates practice testing *high-utility*).\n"
+            "2. **Then check & score.** Grade yourself, log the % in the Drill Log.\n"
+            "3. **Repair the gaps only.** For what you missed, re-study *just* those points, "
+            "then re-test them — don't re-read the whole chapter (low-utility).\n"
+            "4. **Space it out.** The +3 / +14 / +45-day gaps are deliberate — the struggle to "
+            "recall after forgetting is what strengthens memory (Cepeda spacing effect).\n\n"
+            "*Reviewing your notes or re-reading feels productive but is among the least "
+            "effective methods — keep review = testing yourself.*")
     full_q = db.review_queue(today + dt.timedelta(days=7))
     if full_q.empty:
-        st.write("Nothing scheduled yet — complete a sub-reading (Curriculum → open a section) "
-                 "to start the clock.")
+        st.write("Nothing scheduled yet — finish a reading (Curriculum → open one, complete its "
+                 "items) to start the clock.")
         return
     for _, r in full_q.iterrows():
         tag = (f":red[{r['days_overdue']}d overdue]" if r["days_overdue"] > 0
                else (":orange[due today]" if r["days_overdue"] == 0
                      else f":gray[in {-r['days_overdue']}d]"))
         cols = st.columns([5, 1.4, 1.4, 1.2], vertical_alignment="center")
-        cols[0].write(f"**{r['module']}**  \n:gray[{r['topic']} · {r['section']} · {r['review']}]")
+        cols[0].write(f"**{r['module']}**  \n:gray[{r['topic']} · {r['review']}]")
         cols[1].write(f"{r['due']:%b %d}")
         cols[2].write(tag)
-        if cols[3].button("Done", key=f"rev_{r['sub_id']}_{r['review']}"):
-            db.update_submodule(int(r["sub_id"]), **{f"{r['review'].lower()}_done": True})
+        if cols[3].button("Done", key=f"rev_{r['reading_id']}_{r['review']}"):
+            db.update_module(int(r["reading_id"]), **{f"{r['review'].lower()}_done": True})
             db.log_study(today, r["topic"], "Review", source="review-queue",
                          notes=f"{r['module']} {r['review']} complete")
             st.rerun()

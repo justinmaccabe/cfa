@@ -312,3 +312,32 @@ SUBMODULES = [
     (44, '41.10', "Standard VII"),
     (45, '42.1', "Ethics Case Studies"),
 ]
+
+
+# ---- Reading-level structure (the app's "sections" = Schweser readings) --------
+# Collapse the 45 LMs into 42 readings; reading 1's four LMs become "Multiple
+# Regression". Each reading holds its X.Y modules + Key Concepts + Module Quiz.
+READING_TITLE_OVERRIDE = {1: "Multiple Regression"}
+READINGS = []            # (topic, title, book, reading_no)
+_seen_rd = set()
+for _t, _n, _bk, _rd in MODULES:
+    if _rd in _seen_rd:
+        continue
+    _seen_rd.add(_rd)
+    READINGS.append((_t, READING_TITLE_OVERRIDE.get(_rd, _n), _bk, _rd))
+
+_mods_by_reading = {}
+for _sid, _code, _title in SUBMODULES:
+    _mods_by_reading.setdefault(int(_code.split(".")[0]), []).append((_code, _title))
+
+ITEMS = []               # (reading_no, code, name) — modules, then Key Concepts, then Quiz
+for _t, _title, _bk, _rd in READINGS:
+    for _code, _mt in _mods_by_reading.get(_rd, []):
+        ITEMS.append((_rd, _code, _mt))
+    ITEMS.append((_rd, "", "Key Concepts"))
+    ITEMS.append((_rd, "", "Module Quiz"))
+
+# Item workflow states (reviews live at the READING level, so no review states here).
+ITEM_STATUS_OPTIONS = ["Not Started", "Reading in Process", "Reading Completed",
+                       "Practice in Process", "Practice Complete"]
+ITEM_COMPLETE = {"Practice Complete"}

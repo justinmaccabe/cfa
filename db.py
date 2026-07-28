@@ -20,6 +20,8 @@ from sqlalchemy.exc import OperationalError
 
 import curriculum as curr
 
+READINGS_SEED_OK = True   # sentinel for app.py's stale-module reload guard
+
 
 def _database_url():
     url = os.environ.get("DATABASE_URL")
@@ -200,17 +202,17 @@ def _init_db(seed: bool = True):
     with engine.begin() as conn:
         if conn.execute(select(func.count()).select_from(modules)).scalar() == 0:
             conn.execute(modules.insert(), [
-                dict(id=i + 1, topic=t, name=n, book=bk, reading=rd,
+                dict(id=i + 1, topic=t, name=title, book=bk, reading=rd,
                      study_order=curr.STUDY_ORDER.get(t, 50),
-                     status="Not Started", r1_done=False, r2_done=False,
-                     r3_done=False)
-                for i, (t, n, bk, rd) in enumerate(curr.MODULES)
+                     status="Not Started", r1_done=False, r2_done=False, r3_done=False)
+                for i, (t, title, bk, rd) in enumerate(curr.READINGS)
             ])
         if conn.execute(select(func.count()).select_from(submodules)).scalar() == 0:
+            rid = {rd: i + 1 for i, (_t, _ti, _bk, rd) in enumerate(curr.READINGS)}
             conn.execute(submodules.insert(), [
-                dict(section_id=s, code=c, name=n, status="Not Started",
+                dict(section_id=rid[r], code=c, name=n, status="Not Started",
                      r1_done=False, r2_done=False, r3_done=False)
-                for (s, c, n) in curr.SUBMODULES])
+                for (r, c, n) in curr.ITEMS])
         if conn.execute(select(func.count()).select_from(checklist)).scalar() == 0:
             conn.execute(checklist.insert(), [
                 dict(key=k, label=l, note=n, sort=s, done=False)
@@ -266,18 +268,17 @@ def _rollup_section(section_id: int):
     """Recompute a section's status/date_completed from its sub-modules. All done =>
     Done (completed = latest sub date); any progress => In Progress; else Not Started.
     Keeps the modules table — which the Calendar, pace bars and agenda read — honest."""
-    sub = pd.read_sql(select(submodules.c.status, submodules.c.date_completed)
+    sub = pd.read_sql(select(submodules.c.status)
                       .where(submodules.c.section_id == int(section_id)), engine)
     n = len(sub)
-    done = int(sub["status"].isin(curr.COMPLETE_STATES).sum())
+    done = int(sub["status"].isin(curr.ITEM_COMPLETE).sum())
     started = int((sub["status"] != "Not Started").sum())
-    if n and done == n:
-        status = "Done"
-        dc = pd.to_datetime(sub["date_completed"]).max()
-        dc = dc.date() if pd.notna(dc) else None
-    else:
-        status, dc = ("In Progress" if started else "Not Started"), None
+    status = "Done" if (n and done == n) else ("In Progress" if started else "Not Started")
     with engine.begin() as conn:
+        cur = conn.execute(select(modules.c.date_completed)
+                           .where(modules.c.id == int(section_id))).scalar()
+        # reading completes -> stamp date (arms reading-level reviews); backtrack clears it
+        dc = dt.date.today() if (status == "Done" and cur is None) else (None if status != "Done" else cur)
         conn.execute(modules.update().where(modules.c.id == int(section_id))
                      .values(status=status, date_completed=dc))
 
@@ -285,14 +286,9 @@ def _rollup_section(section_id: int):
 def update_submodule(sub_id: int, **fields):
     with engine.begin() as conn:
         conn.execute(submodules.update().where(submodules.c.id == int(sub_id)).values(**fields))
-        sec, status, dc = conn.execute(
-            select(submodules.c.section_id, submodules.c.status, submodules.c.date_completed)
-            .where(submodules.c.id == int(sub_id))).first()
-        # reaching a complete state starts the spaced-review clock if not already dated
-        if status in curr.COMPLETE_STATES and dc is None:
-            conn.execute(submodules.update().where(submodules.c.id == int(sub_id))
-                         .values(date_completed=dt.date.today()))
-    _rollup_section(sec)
+        sec = conn.execute(select(submodules.c.section_id)
+                           .where(submodules.c.id == int(sub_id))).scalar()
+    _rollup_section(sec)   # rolls the reading's status + review clock up from its items
 
 
 def log_study(date, topic, activity, minutes=0.0, module_id=None, num_q=None,
@@ -335,10 +331,8 @@ def review_queue(as_of: dt.date = None) -> pd.DataFrame:
     computed from each completed sub-module's date_completed + REVIEW_LAGS. One row
     per outstanding review (sub_id, topic, section, module, which review, due, overdue)."""
     as_of = as_of or dt.date.today()
-    df = get_submodules_df()
-    # a review only queues once the item is genuinely complete AND dated — a stray
-    # date on a still-in-progress row won't start the clock early.
-    done = df[df["date_completed"].notna() & df["status"].isin(curr.COMPLETE_STATES)]
+    m = get_modules_df()                       # reviews are at the READING level now
+    done = m[m["date_completed"].notna()]
     rows = []
     for _, r in done.iterrows():
         base = pd.to_datetime(r["date_completed"]).date()
@@ -347,9 +341,8 @@ def review_queue(as_of: dt.date = None) -> pd.DataFrame:
                 continue
             due = base + dt.timedelta(days=lag)
             if due <= as_of:
-                rows.append(dict(sub_id=int(r["id"]), topic=r["topic"],
-                                 section=r["section_name"],
-                                 module=f"{r['code']} · {r['name']}", review=f"R{n}",
+                rows.append(dict(reading_id=int(r["id"]), topic=r["topic"],
+                                 module=r["name"], review=f"R{n}",
                                  due=due, days_overdue=(as_of - due).days))
     out = pd.DataFrame(rows)
     return out.sort_values("due") if not out.empty else out
