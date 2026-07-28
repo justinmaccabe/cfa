@@ -42,3 +42,4 @@ study tool, not a project — tool-building is the sneakiest form of exam
 procrastination. The xlsx planner remains the schedule authority; this tracks
 progress and performance.
 # cfa
+# cfa
