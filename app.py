@@ -531,6 +531,9 @@ def section_dialog(sec_id, sec_name, topic):
                 unsafe_allow_html=True)
     subs = db.submodules_for_section(sec_id)
     show = subs[["id", "code", "name", "status", "confidence", "notes"]].copy()
+    fx_col = subs["formulas"].fillna("").apply(
+        lambda s: (s.replace("\n", " · ")[:38] + "…") if len(s) > 39 else s.replace("\n", " · "))
+    show["formulas"] = fx_col
     edited = st.data_editor(
         show, width="stretch", hide_index=True, key=f"subed_{sec_id}",
         column_config={
@@ -541,7 +544,10 @@ def section_dialog(sec_id, sec_name, topic):
                 "Status", options=curr.ITEM_STATUS_OPTIONS, width="medium"),
             "confidence": st.column_config.NumberColumn(
                 "Perf %", min_value=0, max_value=100, step=1, format="%d%%", width="small"),
-            "notes": st.column_config.TextColumn("Notes", width="large"),
+            "notes": st.column_config.TextColumn("Notes", width="medium"),
+            "formulas": st.column_config.TextColumn(
+                "Formulas", disabled=True, width="medium",
+                help="Edit below — one formula per line"),
         })
     st.caption("When every item reaches **Practice Complete**, the reading is done and its "
                "+3 / +14 / +45-day reviews arm (Reviews tab). **Module Quiz** performance flows "
@@ -564,6 +570,23 @@ def section_dialog(sec_id, sec_name, topic):
                                  num_correct=int(r["confidence"]), source="Module Quiz",
                                  notes=sec_name)
         st.success(f"Saved {n} change(s).")
+        st.rerun()
+
+    # --- Formulas: multi-line, one per line, per item -------------------------
+    st.markdown("<hr class='page-rule'>", unsafe_allow_html=True)
+    st.markdown("##### 📐 Formulas")
+    opts = {(f"{r['code']}  {r['name']}" if r["code"] else r["name"]): int(r["id"])
+            for _, r in subs.iterrows()}
+    label = st.selectbox("Item", list(opts.keys()), key=f"fx_sel_{sec_id}")
+    iid = opts[label]
+    cur = subs.set_index("id").loc[iid, "formulas"]
+    cur = "" if pd.isna(cur) else cur
+    new_fx = st.text_area("One formula per line", cur, height=180, key=f"fx_txt_{sec_id}_{iid}",
+                          placeholder="R² = (Total Var − Unexplained Var) / Total Var\n"
+                                       "Adjusted R² = 1 − [(n−1)/(n−k−1)]·(1−R²)\nAIC = …")
+    if st.button("Save formulas", key=f"fx_save_{sec_id}"):
+        db.update_submodule(iid, formulas=new_fx.strip() or None)
+        st.success("Formulas saved.")
         st.rerun()
 
 

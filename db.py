@@ -139,6 +139,7 @@ submodules = Table(
     Column("r2_done", Boolean, nullable=False, default=False),
     Column("r3_done", Boolean, nullable=False, default=False),
     Column("notes", Text),
+    Column("formulas", Text),        # multi-line formula scratchpad per item
 )
 
 # Manual / logistics tasks that live on the agenda and can be ticked off (they
@@ -190,10 +191,15 @@ def init_db(seed: bool = True):
 def _migrate():
     """Additive migrations for DBs created before a column existed. Cheap to run
     every boot; only ALTERs when something is genuinely missing."""
-    cols = {c["name"] for c in inspect(engine).get_columns("modules")}
+    insp = inspect(engine)
+    cols = {c["name"] for c in insp.get_columns("modules")}
     with engine.begin() as conn:
         if "study_order" not in cols:
             conn.execute(text("ALTER TABLE modules ADD COLUMN study_order INTEGER"))
+        if insp.has_table("submodules"):
+            subcols = {c["name"] for c in insp.get_columns("submodules")}
+            if "formulas" not in subcols:
+                conn.execute(text("ALTER TABLE submodules ADD COLUMN formulas TEXT"))
 
 
 def _init_db(seed: bool = True):
