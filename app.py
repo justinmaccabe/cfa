@@ -533,7 +533,7 @@ def section_dialog(sec_id, sec_name, topic):
     subs = db.submodules_for_section(sec_id)
     show = subs[["id", "code", "name", "status", "confidence", "notes"]].copy()
     fx_col = subs["formulas"].fillna("").apply(
-        lambda s: (s.replace("\n", " · ")[:38] + "…") if len(s) > 39 else s.replace("\n", " · "))
+        lambda s: f"📐 {len([ln for ln in s.splitlines() if ln.strip()])}" if s.strip() else "")
     show["formulas"] = fx_col
     edited = st.data_editor(
         show, width="stretch", hide_index=True, key=f"subed_{sec_id}",
@@ -547,8 +547,8 @@ def section_dialog(sec_id, sec_name, topic):
                 "Perf %", min_value=0, max_value=100, step=1, format="%d%%", width="small"),
             "notes": st.column_config.TextColumn("Notes", width="medium"),
             "formulas": st.column_config.TextColumn(
-                "Formulas", disabled=True, width="medium",
-                help="Edit below — one formula per line"),
+                "📐", disabled=True, width="small",
+                help="# formulas saved — read/edit the full text in the Formulas box below"),
         })
     st.caption("When every item reaches **Practice Complete**, the reading is done and its "
                "+3 / +14 / +45-day reviews arm (Reviews tab). **Module Quiz** performance flows "
