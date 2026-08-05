@@ -244,6 +244,13 @@ def _init_db(seed: bool = True):
         if conn.execute(select(func.count()).select_from(settings)).scalar() == 0:
             conn.execute(settings.insert(), [
                 dict(key=k, value=v) for k, v in SEED_SETTINGS.items()])
+        # one-time curated formula backfill (won't re-add once you've edited/cleared it)
+        if conn.execute(select(settings.c.value)
+                        .where(settings.c.key == "fx_seed_v1")).scalar() is None:
+            for code, txt in curr.FORMULA_SEED.items():
+                conn.execute(submodules.update()
+                             .where(submodules.c.code == code).values(formulas=txt))
+            conn.execute(settings.insert().values(key="fx_seed_v1", value="1"))
 
 
 # ---- read helpers -------------------------------------------------

@@ -130,6 +130,19 @@ STATUS_OPTIONS = [
     "Practice in Process", "Practice Complete", "Pending Review", "Reviewed",
 ]
 COMPLETE_STATES = {"Practice Complete", "Pending Review", "Reviewed"}
+# a module counts as "read" (fills the Curriculum bar) once it hits Reading Completed+
+READ_DONE_STATES = {"Reading Completed", "Practice in Process", "Practice Complete"}
+
+# One-time curated formula backfill (item code -> multi-line text). Applied once via a
+# settings flag, so it never overwrites or re-adds after you edit/clear it.
+FORMULA_SEED = {
+    "1.2": ("R² = (Total Var − Unexplained Var) / Total Var = SSR/SST = 1 − SSE/SST\n"
+            "Adjusted R² = 1 − [(n−1)/(n−k−1)] × (1 − R²)\n"
+            "AIC = n·ln(SSE/n) + 2(k+1)   (lower = better; favors prediction)\n"
+            "BIC = n·ln(SSE/n) + ln(n)·(k+1)   (lower = better; penalizes complexity more)\n"
+            "Partial F = [(SSE_R − SSE_U)/q] / [SSE_U/(n−k−1)]   (q = # restrictions)\n"
+            "Overall F = MSR/MSE = (RSS/k) / (SSE/(n−k−1))"),
+}
 # Actively being worked (still shows on the agenda). Practice-Complete and beyond
 # drop off and only reappear through the review queue when a review is actually due.
 ACTIVE_STATES = {"Reading in Process", "Reading Completed", "Practice in Process"}

@@ -521,7 +521,8 @@ def page_today():
         for row in topic_schedule():
             badge = ":green[on track]" if row["on_track"] else ":red[behind]"
             st.markdown(f"**{row['topic']}** · target {row['target']:%b %-d, %Y} · {badge}")
-            st.markdown(_bar(row["done"], row["tot"]), unsafe_allow_html=True)
+            st.markdown(_bar(row["done"] / row["tot"] * 100 if row["tot"] else 0,
+                             row["done"], row["tot"]), unsafe_allow_html=True)
 
 
 # ================================================================= CURRICULUM
@@ -590,9 +591,10 @@ def section_dialog(sec_id, sec_name, topic):
         st.rerun()
 
 
-def _bar(done, tot):
-    pct = int(done / tot * 100) if tot else 0
-    return (f"<div class='cbar'><div class='cbar-fill' style='width:{pct}%'></div></div>"
+def _bar(fill, done, tot):
+    """Bar fill % and the done/tot label are decoupled: on Curriculum the fill shows
+    reading progress while the number stays practice-complete."""
+    return (f"<div class='cbar'><div class='cbar-fill' style='width:{fill:.0f}%'></div></div>"
             f"<span class='cbar-txt'>{done}/{tot}</span>")
 
 
@@ -612,11 +614,14 @@ def page_curriculum():
             st.markdown(f"<div class='cur-topic' style='border-color:{SIGNAL_COLOR[sig]}'>"
                         f"{cur_topic}</div>", unsafe_allow_html=True)
         sub = subs_all[subs_all["section_id"] == s["id"]]
-        done, tot = int(sub["status"].isin(curr.ITEM_COMPLETE).sum()), len(sub)
+        mod_items = sub[sub["code"].fillna("").astype(str).str.strip() != ""]  # 1.1, 1.2 …
+        read_done = int(mod_items["status"].isin(curr.READ_DONE_STATES).sum())
+        fill = read_done / len(mod_items) * 100 if len(mod_items) else 0        # bar = reading
+        done, tot = int(sub["status"].isin(curr.ITEM_COMPLETE).sum()), len(sub)  # number = practice
         c = st.columns([0.7, 6, 2, 1.3], vertical_alignment="center")
         c[0].markdown(f"<span class='cur-bk'>Bk {int(s['book'])}</span>", unsafe_allow_html=True)
         c[1].markdown(f"**{s['name']}**")
-        c[2].markdown(_bar(done, tot), unsafe_allow_html=True)
+        c[2].markdown(_bar(fill, done, tot), unsafe_allow_html=True)
         if c[3].button("Open ▸", key=f"open_{s['id']}", width="stretch"):
             section_dialog(int(s["id"]), s["name"], s["topic"])
 
