@@ -36,7 +36,8 @@ Copyrighted PDFs never land here — `.gitignore` excludes `*.pdf` / `*.xlsx`; t
    ```toml
    DATABASE_URL = "postgresql://user:pass@ep-xxx.neon.tech/dbname?sslmode=require"
    ```
-3. Deploy. First boot creates the tables and seeds the 45 sections + 171 sub-modules.
+3. Deploy. First boot creates the tables and seeds the 42 readings + 255 items + the 382
+   official 2027 LOS.
 
 ## 4. One-time: load your files + set your password into the CLOUD db
 The Postgres starts empty of your PDFs/notes. Push them up once from your machine,

@@ -13,9 +13,10 @@ Read current state before making claims about coverage, weak areas, or what's du
 cd ~/Documents/cfa-l2-tracker && python3 -c "
 import db, datetime as dt
 m = db.get_modules_df()
-print('Done:', int((m.status=='Done').sum()), '/ 45')
+print('Done:', int((m.status=='Done').sum()), '/ 42 readings')
 print(m[m.status!='Not Started'][['id','topic','name','status','confidence']].to_string(index=False))
 print('--- reviews due ---'); print(db.review_queue().to_string(index=False))
+c = db.los_counts(); print('LOS ticked:', int(c.n_done.sum()), '/', int(c.n_los.sum()))
 "
 ```
 
@@ -26,13 +27,31 @@ Use the same helpers the app uses so both stay in sync:
 - Ran a drill with the tutor → `db.log_study(date, topic, 'Practice', minutes=..., num_q=..., num_correct=..., predicted=..., source='Claude', notes=...)`.
 - Cleared a review → `db.update_module(id, r1_done=True)` (or r2/r3) **and** log a Review row.
 - Mock scored → `db.add_mock(date, source, score_pct, minutes_used, weak_topics, action_items)`.
+- Justin says he can now do what a LOS asks → `db.set_los_done(los_id, True)`.
+
+## Official Learning Outcome Statements
+The `los` table holds the 382 official CFA Institute 2027 LOS, attached to the reading
+that covers each one (`db.los_for_reading(reading_id)`, `db.los_counts()`). Reference
+text comes from `los_2027.py`; `done` is Justin's own "I can do this unaided" tick.
+
+Use them as the **authority on what the exam asks** — quiz against the LOS verb, not
+your own sense of the topic ("calculate" and "describe" are different asks). Grouped by
+`lm` (the official learning module), which is finer-grained than our readings in two
+places: reading 1 is four LMs, reading 41 is one per Standard I-VII.
+
+LOS ticks are advisory — they do NOT complete a reading or arm reviews, so don't infer
+coverage from them alone. `submodules.status` remains the record of content covered.
 
 ## Confirm before writing
 Mutating rows is a side effect — echo back what you're about to record ("Logging:
 Equity practice, 18/25, ~15 min") and write on a clear yes, so the shared record
 stays trustworthy.
 
-## Module ids
-`modules.id` == curriculum order 1–45 (Quant 1–7, Econ 8–9, FSA 10–15,
-Corp Issuers 16–19, Equity 20–25, FI 26–30, Derivatives 31–32, Alt 33–36,
-PM 37–42, Ethics 43–45). Look up by name if unsure: `db.get_modules_df()`.
+## Reading ids
+`modules.id` == reading order 1–42 (Quant 1–4, Econ 5–6, FSA 7–12, Corp Issuers 13–16,
+Equity 17–22, FI 23–27, Derivatives 28–29, Alt 30–33, PM 34–39, Ethics 40–42). Look up
+by name if unsure: `db.get_modules_df()`.
+
+Below each reading sit its 255 items in `submodules` — the Schweser X.Y modules plus a
+Key Concepts and a Module Quiz row each. That's the tier day-to-day check-off happens
+on; reading status rolls up from it.

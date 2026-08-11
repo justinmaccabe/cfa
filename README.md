@@ -21,8 +21,9 @@ First run creates `cfa.db` and seeds the 45 modules from `curriculum.py`.
 ## Tabs
 - **Overview** — countdown, modules complete, hours this week, reviews due, progress
   by topic (coloured by your Level I signal).
-- **Curriculum** — the 45 modules; edit status / confidence / completion date / notes.
-  Setting a completion date auto-schedules the +3 / +14 / +45-day reviews.
+- **Curriculum** — the 42 readings; open one to edit status / confidence / notes / formulas
+  per item, and to tick off its official **Learning Outcome Statements**. Completing every
+  item auto-schedules the +3 / +14 / +45-day reviews.
 - **Reviews** — the spaced-review queue; mark reviews done.
 - **Drill Log** — log any study session or practice set (with a *predicted %* for calibration).
 - **Mocks** — full-length mock scores over time + remediation notes.
@@ -33,7 +34,9 @@ First run creates `cfa.db` and seeds the 45 modules from `curriculum.py`.
 |---|---|
 | `app.py` | Streamlit UI |
 | `db.py` | schema + seed + read/write helpers + the review-queue logic |
-| `curriculum.py` | the 45 modules, topic weights, planned study order, L1 signal |
+| `curriculum.py` | the 42 readings + 255 items, topic weights, planned study order, L1 signal |
+| `los_2027.py` | generated: the 382 official CFA Institute 2027 LOS, per reading |
+| `extract_los.py` | dev-time: regenerates `los_2027.py` from the CFAI topic-outline PDF |
 | `AGENT.md` | how the chat tutor reads/writes this DB (the shared-brain contract) |
 
 ## Scope guardrail

@@ -103,6 +103,10 @@ MODULES = [
     ("Alternative Investments", "Investments in Real Estate through Publicly Traded Securities", 4, 32),
     ("Alternative Investments", "Hedge Fund Strategies", 4, 33),
     # ---- Book 5: Portfolio Management (R34-39) + Ethics (R40-42) -----------
+    # Ethics note: the official 2027 outline splits "Guidance for Standards" into seven
+    # LMs, one per Standard I-VII, where Schweser (and so R41 below) keeps one reading
+    # with items 41.1-41.10. The LOS checklist surfaces the official per-Standard
+    # grouping inside R41, so nothing is lost by leaving the reading whole.
     ("Portfolio Management", "Economics and Investment Markets", 5, 34),
     ("Portfolio Management", "Analysis of Active Portfolio Management", 5, 35),
     ("Portfolio Management", "Exchange-Traded Funds: Mechanics and Applications", 5, 36),

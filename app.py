@@ -27,12 +27,14 @@ import streamlit.components.v1 as components
 
 import curriculum as curr
 import db
+import los_2027
 
 # Streamlit Cloud keeps a warm process: app.py re-runs on each deploy but sibling
 # modules can stay stale in sys.modules, so a newly-added db/curr symbol raises
 # AttributeError until reboot. Reload them if a recent symbol is missing.
-if not hasattr(db, "READINGS_SEED_OK") or not hasattr(curr, "READINGS"):
+if not hasattr(db, "los_for_reading") or not hasattr(curr, "READINGS"):
     importlib.reload(curr)
+    importlib.reload(los_2027)
     importlib.reload(db)
 
 st.set_page_config(page_title="CFA Level II — Study Tracker",
@@ -176,6 +178,12 @@ h2, h3 {{ color:{INK}; border-left:3px solid {PRIMARY}; padding-left:.55rem; }}
     border-radius:5px; overflow:hidden; vertical-align:middle; }}
 .cbar-fill {{ display:block; height:100%; background:{TEAL}; }}
 .cbar-txt {{ font-size:.72rem; color:{MUTE}; margin-left:.45rem; vertical-align:middle; }}
+
+/* --- LOS checklist (reading modal) --- */
+.los-lm {{ margin:.85rem 0 .1rem; padding-left:.5rem; border-left:3px solid {TEAL};
+    font-size:.7rem; letter-spacing:.13em; text-transform:uppercase; color:{PRIMARY};
+    font-weight:700; }}
+.los-count {{ font-size:.8rem; color:{MUTE}; font-style:italic; font-weight:400; }}
 
 /* --- resource cards --- */
 .rescard {{ border:1px solid rgba(51,87,101,.2); border-left:4px solid {PRIMARY};
@@ -526,6 +534,38 @@ def page_today():
 
 
 # ================================================================= CURRICULUM
+# Every official LOS opens with one of these command verbs (18 of them across all 382).
+# The verb is what sets the bar — "describe" and "calculate" are different exam asks —
+# so it gets bolded, which makes a long checklist scannable by difficulty.
+LOS_VERBS = {"analyze", "calculate", "compare", "contrast", "define", "demonstrate",
+             "describe", "determine", "discuss", "estimate", "evaluate", "explain",
+             "formulate", "identify", "interpret", "justify", "recommend"}
+
+
+def _los_label(text):
+    """Bold the leading verb phrase: 'calculate and interpret x' -> '**calculate and
+    interpret** x'. Walks verbs joined by and/or/commas, so multi-verb stems stay whole."""
+    words, n = text.split(), 0
+    while n < len(words):
+        w = words[n].strip(",").lower()
+        if w in LOS_VERBS:
+            n += 1
+        elif (w in ("and", "or", "and/or") and n + 1 < len(words)
+              and words[n + 1].strip(",").lower() in LOS_VERBS):
+            n += 1
+        else:
+            break
+    return f"**{' '.join(words[:n])}** {' '.join(words[n:])}" if n else text
+
+
+def _toggle_los(los_id, key):
+    """Persist a LOS tick. An on_change callback rather than the compare-then-write
+    pattern used elsewhere, because this runs inside a dialog: st.dialog is a fragment,
+    so an explicit st.rerun() would rerun the whole app and slam the modal shut on every
+    tick. Callbacks fire before the fragment reruns, so the count above stays in step."""
+    db.set_los_done(los_id, bool(st.session_state.get(key)))
+
+
 @st.dialog("Reading", width="large")
 def section_dialog(sec_id, sec_name, topic):
     st.markdown(f"<span class='page-eyebrow'>{topic}</span><br><b>{sec_name}</b>",
@@ -573,6 +613,29 @@ def section_dialog(sec_id, sec_name, topic):
         st.success(f"Saved {n} change(s).")
         st.rerun()
 
+    # --- Learning outcomes: the official CFA Institute LOS for this reading ----
+    # Grouped by the official learning module, which is finer-grained than our reading
+    # list in two places: reading 1 is four LMs, reading 41 is one per Standard. Showing
+    # the grouping means the exam's own structure is visible instead of flattened away.
+    lo = db.los_for_reading(sec_id)
+    if not lo.empty:
+        st.markdown("<hr class='page-rule'>", unsafe_allow_html=True)
+        n_done = int(lo["done"].sum())
+        st.markdown(f"##### 🎯 Learning Outcomes "
+                    f"<span class='los-count'>· {n_done}/{len(lo)} ticked</span>",
+                    unsafe_allow_html=True)
+        st.caption(f"The exam's own statement of what you must be able to do — "
+                   f"{los_2027.SOURCE}. Tick one when you can do it unaided. Advisory: "
+                   "LOS ticks don't complete the reading or arm its reviews.")
+        multi_lm = lo["lm"].nunique() > 1
+        for lm, grp in lo.groupby("lm", sort=False):
+            if multi_lm:
+                st.markdown(f"<div class='los-lm'>{lm}</div>", unsafe_allow_html=True)
+            for _, l in grp.iterrows():
+                key = f"los_{int(l['id'])}"
+                st.checkbox(_los_label(l["text"]), value=bool(l["done"]), key=key,
+                            on_change=_toggle_los, args=(int(l["id"]), key))
+
     # --- Formulas: multi-line, one per line, per item -------------------------
     st.markdown("<hr class='page-rule'>", unsafe_allow_html=True)
     st.markdown("##### 📐 Formulas")
@@ -602,7 +665,8 @@ def page_curriculum():
     n_ch, n_read, n_items = len(curr.TOPICS), len(curr.READINGS), len(curr.ITEMS)
     page_header("The map",
                 f"Curriculum <i style='font-weight:400;font-size:1.35rem;color:{MUTE}'>"
-                f"· {n_ch} Chapters · {n_read} Readings · {n_items} Items</i>")
+                f"· {n_ch} Chapters · {n_read} Readings · {n_items} Items "
+                f"· {len(los_2027.LOS)} LOS</i>")
     st.caption("Each row is a reading. **Open** it to check off its modules, Key Concepts and "
                "Module Quiz — reading progress, the calendar and the pace bars all roll up from there.")
     subs_all = db.get_submodules_df()

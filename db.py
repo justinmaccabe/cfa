@@ -19,9 +19,10 @@ from sqlalchemy import (
 from sqlalchemy.exc import OperationalError
 
 import curriculum as curr
+import los_2027 as los_data
 
-READINGS_SEED_OK = True   # sentinel for app.py's stale-module reload guard
 CURRICULUM_VERSION = "2-readings"   # bump on any structural change to force a re-seed
+LOS_VERSION = "2027-1"    # official-outline edition the `los` rows were seeded from
 
 
 def _database_url():
@@ -142,6 +143,26 @@ submodules = Table(
     Column("formulas", Text),        # multi-line formula scratchpad per item
 )
 
+# The official CFA Institute Learning Outcome Statements — the exam's own statement
+# of what you must be able to do — attached to the reading that covers each one. The
+# text is seeded reference data (los_2027.py); `done` is yours: a self-check that you
+# can actually do what the statement asks.
+#
+# Deliberately OUTSIDE the section roll-up. Ticking a LOS neither completes a reading
+# nor arms a review — that stays driven by the Schweser items in `submodules`, so
+# "Done" keeps meaning exactly what it meant before. LOS coverage is a second, purely
+# advisory read on the same reading.
+los = Table(
+    "los", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("reading_id", Integer, nullable=False),   # -> modules.id
+    Column("lm", String),          # official learning-module name (the grouping)
+    Column("seq", Integer),        # outline order within the reading
+    Column("text", Text, nullable=False),
+    Column("done", Boolean, nullable=False, default=False),
+    Column("done_date", Date),
+)
+
 # Manual / logistics tasks that live on the agenda and can be ticked off (they
 # aren't sub-readings). Seeded with the pre-game checklist.
 checklist = Table(
@@ -215,6 +236,10 @@ def _init_db(seed: bool = True):
         ver = conn.execute(select(settings.c.value)
                            .where(settings.c.key == "curriculum_version")).scalar()
         if ver != CURRICULUM_VERSION:
+            # los.reading_id points at modules.id, so it has to go too — otherwise the
+            # re-seeded readings inherit another structure's LOS.
+            conn.execute(los.delete())
+            conn.execute(settings.delete().where(settings.c.key == "los_version"))
             conn.execute(submodules.delete())
             conn.execute(modules.delete())
             conn.execute(settings.delete().where(settings.c.key == "curriculum_version"))
@@ -233,6 +258,21 @@ def _init_db(seed: bool = True):
                 dict(section_id=rid[r], code=c, name=n, status="Not Started",
                      r1_done=False, r2_done=False, r3_done=False)
                 for (r, c, n) in curr.ITEMS])
+        # Official LOS. Version-stamped separately from the curriculum: when CFA
+        # Institute publishes a new edition, the statements are replaced and the ticks
+        # go with them (they no longer refer to the same LOS). Same-edition boots skip
+        # this entirely, so tick state survives every restart and redeploy.
+        los_ver = conn.execute(select(settings.c.value)
+                               .where(settings.c.key == "los_version")).scalar()
+        if los_ver != LOS_VERSION:
+            conn.execute(los.delete())
+        if conn.execute(select(func.count()).select_from(los)).scalar() == 0:
+            rid = {rd: i + 1 for i, (_t, _ti, _bk, rd) in enumerate(curr.READINGS)}
+            conn.execute(los.insert(), [
+                dict(reading_id=rid[rd], lm=lm, seq=seq, text=txt, done=False)
+                for (rd, lm, seq, txt) in los_data.LOS if rd in rid])
+            conn.execute(settings.delete().where(settings.c.key == "los_version"))
+            conn.execute(settings.insert().values(key="los_version", value=LOS_VERSION))
         # idempotent: add any checklist items missing from the current DB (so new
         # seeded tasks appear on existing/deployed databases, not just fresh ones)
         have_keys = set(conn.execute(select(checklist.c.key)).scalars())
@@ -283,7 +323,8 @@ def update_module(module_id: int, **fields):
 
 
 def get_submodules_df() -> pd.DataFrame:
-    """All 171 sub-modules, joined to their section's topic + name."""
+    """All 255 items (171 Schweser sub-modules + a Key Concepts and Module Quiz row per
+    reading), joined to their section's topic + name."""
     df = pd.read_sql(select(submodules).order_by(submodules.c.id), engine)
     secs = (get_modules_df()[["id", "topic", "name", "study_order", "book"]]
             .rename(columns={"id": "section_id", "name": "section_name"}))
@@ -320,6 +361,34 @@ def update_submodule(sub_id: int, **fields):
         sec = conn.execute(select(submodules.c.section_id)
                            .where(submodules.c.id == int(sub_id))).scalar()
     _rollup_section(sec)   # rolls the reading's status + review clock up from its items
+
+
+# ---- official Learning Outcome Statements -------------------------
+def los_for_reading(reading_id: int) -> pd.DataFrame:
+    """One reading's official LOS in outline order, with tick state. Grouped by `lm`
+    for display: most readings have one learning module, reading 1 has four and
+    reading 41 has seven (one per Standard)."""
+    return pd.read_sql(select(los).where(los.c.reading_id == int(reading_id))
+                       .order_by(los.c.seq), engine)
+
+
+def set_los_done(los_id: int, done: bool):
+    with engine.begin() as conn:
+        conn.execute(los.update().where(los.c.id == int(los_id))
+                     .values(done=bool(done),
+                             done_date=dt.date.today() if done else None))
+
+
+def los_counts() -> pd.DataFrame:
+    """(reading_id, n_los, n_done) per reading. Grouped in pandas rather than SQL
+    because summing a boolean isn't portable between SQLite and Postgres."""
+    df = pd.read_sql(select(los.c.reading_id, los.c.done), engine)
+    if df.empty:
+        return pd.DataFrame(columns=["reading_id", "n_los", "n_done"])
+    out = (df.groupby("reading_id")["done"]
+             .agg(n_los="size", n_done="sum").reset_index())
+    out["n_done"] = out["n_done"].astype(int)
+    return out
 
 
 def log_study(date, topic, activity, minutes=0.0, module_id=None, num_q=None,
