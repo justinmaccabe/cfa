@@ -365,15 +365,34 @@ ITEM_COMPLETE = {"Practice Complete"}
 # five fixed steps to run on EVERY reading, tracked at the READING level rather than
 # per item — one MM video covers a whole reading, so the X.Y tier is the wrong grain.
 #
-# Four are simple ticks. The fifth, CFA practice questions, is a done/total pair
-# instead: it gets worked through over several sittings, and the total is typed by
-# hand per reading (no CFAI parsing). It renders below these four because it needs
-# the number pair, which is also why it isn't in this list.
-STUDY_LOOP_FLAGS = [
-    ("mm_video",     "MM video",      "Mark Meldrum video for this reading watched"),
-    ("cfa_read",     "CFA read",      "Official CFA reading skimmed — the blue-box examples especially"),
-    ("mm_q",         "MM Qs",         "Mark Meldrum practice questions done"),
-    ("formula_done", "Formula sheet", "Formula sheet / Schweser QuickSheet updated for this reading"),
+# STUDY_LOOP_STEPS is the loop IN THE ORDER JUSTIN RUNS IT (his call, Aug 2026), which
+# is what the modal renders top to bottom. Three kinds of step:
+#   flag  -> a boolean column on `modules`, ticked here
+#   items -> not stored here at all: it's the Schweser read, tracked per module in
+#            `submodules.status`, so this step just points at the items table and shows
+#            its progress. Keeping it in the list is the point — the sequence reads
+#            straight through instead of leaving him to remember where step 2 lives.
+#   count -> the cfa_q_done / cfa_q_total pair (typed by hand, no CFAI parsing)
+STUDY_LOOP_STEPS = [
+    ("mm_video", "flag", "MM video",
+     "Mark Meldrum first — he builds the mental model before you meet the dense text."),
+    ("items", "items", "Schweser read",
+     "Consolidate and annotate. Tracked per module in the table below: set each row's "
+     "Status (…→ Practice Complete), not a tick up here."),
+    ("cfa_read", "flag", "CFA blue boxes / skim",
+     "The authority — catches whatever MM compressed."),
+    ("mm_q", "flag", "MM Qs",
+     "Drill on MM's questions first."),
+    ("cfa_q", "count", "CFA Qs",
+     "Then the exam-shaped set. Type this reading's total; the step clears when done reaches it."),
+    ("formula_done", "flag", "Formula sheet / QuickSheet",
+     "The formula pass. NOT your review — reviews are closed-book retrieval in the Reviews tab."),
 ]
-STUDY_LOOP_STEPS = len(STUDY_LOOP_FLAGS) + 1     # + CFA practice questions (done/total)
-RESOURCE_ROLES = "MM = teacher · CFA = authority + Qs · Schweser = review / formulas"
+# What the db layer stores: the four booleans, in loop order.
+STUDY_LOOP_FLAGS = [(k, label, help_txt)
+                    for k, kind, label, help_txt in STUDY_LOOP_STEPS if kind == "flag"]
+# What he ticks or types (the four flags + the CFA-question pair). The Schweser read is
+# excluded on purpose: `submodules.status` is its record, and double-counting it here
+# would let the loop claim a reading was covered when the items say otherwise.
+STUDY_LOOP_TICKS = len(STUDY_LOOP_FLAGS) + 1
+RESOURCE_ROLES = "MM = teacher · CFA = authority + Qs · Schweser = read + review/formulas"

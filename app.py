@@ -32,7 +32,7 @@ import los_2027
 # Streamlit Cloud keeps a warm process: app.py re-runs on each deploy but sibling
 # modules can stay stale in sys.modules, so a newly-added db/curr symbol raises
 # AttributeError until reboot. Reload them if a recent symbol is missing.
-if not hasattr(db, "study_loop_state") or not hasattr(curr, "STUDY_LOOP_FLAGS"):
+if not hasattr(db, "study_loop_state") or not hasattr(curr, "STUDY_LOOP_TICKS"):
     importlib.reload(curr)
     importlib.reload(los_2027)
     importlib.reload(db)
@@ -190,6 +190,8 @@ h2, h3 {{ color:{INK}; border-left:3px solid {PRIMARY}; padding-left:.55rem; }}
 .loop-lab {{ font-size:.88rem; color:{INK}; }}
 .loop-lab .tick {{ color:{TEAL}; font-weight:700; }}
 .loop-lab .tick.off {{ color:{MUTE}; font-weight:400; }}
+.loop-hint {{ font-size:.78rem; color:{MUTE}; font-style:italic; }}
+.loop-of {{ font-size:.82rem; color:{MUTE}; text-align:center; }}
 .loop-pip {{ font-size:.66rem; letter-spacing:.12em; color:{TEAL}; white-space:nowrap; }}
 .loop-pip.none {{ color:rgba(51,87,101,.28); }}
 
@@ -588,34 +590,62 @@ def _save_cfa_q(sec_id, field, key):
     db.update_module(sec_id, **{field: None if v is None else int(v)})
 
 
-def _study_loop(sec_id, row):
-    """The five fixed steps to run on every reading — one job per resource — ticked at the
-    READING level, above the items table. Re-read from the DB on each fragment run so the
-    count tracks the ticks; each control saves itself, so there's no Save to forget."""
+def _loop_step_label(n, label, state):
+    """A numbered step line for the rows that aren't checkboxes (the Schweser read and the
+    CFA-question pair), styled to sit level with the checkbox rows above and below."""
+    tick = "✓" if state else "○"
+    return (f"<div class='loop-lab'><span class='tick{'' if state else ' off'}'>{tick}</span>"
+            f" <b>{n}.</b> {label}</div>")
+
+
+def _study_loop(sec_id, row, subs):
+    """The study loop, rendered top-to-bottom IN THE ORDER JUSTIN RUNS IT, so the modal is
+    the instruction sheet and he doesn't have to hold the sequence in his head.
+
+    Step 2 is the Schweser read, which is NOT a tick up here: it's the items table below,
+    one row per module. That step shows its own progress and says where to record it —
+    without that, "what do I tick when I finish 1.1" has no visible answer.
+
+    Each control saves itself on change; an explicit st.rerun() inside this dialog fragment
+    would shut the modal on every click."""
     s = db.study_loop_state(row)
+    n_items = len(subs)
+    items_done = int(subs["status"].isin(curr.ITEM_COMPLETE).sum())
+    items_ok = bool(n_items and items_done == n_items)
     st.markdown(f"##### 🔁 Study loop "
-                f"<span class='loop-count'>· {s['done']}/{s['total']} done</span>",
+                f"<span class='loop-count'>· {s['done']}/{s['total']} ticked"
+                f" · Schweser modules {items_done}/{n_items}</span>",
                 unsafe_allow_html=True)
-    cols = st.columns(len(curr.STUDY_LOOP_FLAGS))
-    for col, (field, label, help_txt) in zip(cols, curr.STUDY_LOOP_FLAGS):
-        key = f"loop_{field}_{sec_id}"
-        col.checkbox(label, value=s[field], key=key, help=help_txt,
-                     on_change=_toggle_loop_flag, args=(sec_id, field, key))
-    # CFA questions are a done-of-total pair, not a tick: Justin types the total for this
-    # reading himself, and the step clears when done reaches it.
-    q = st.columns([1.5, 1, 1, 3.8], vertical_alignment="bottom")
-    tick = "✓" if s["cfa_q_ok"] else "○"
-    q[0].markdown(f"<span class='loop-lab'><span class='tick{'' if s['cfa_q_ok'] else ' off'}'>"
-                  f"{tick}</span> CFA practice Qs</span>", unsafe_allow_html=True)
-    kd, kt = f"loop_cqd_{sec_id}", f"loop_cqt_{sec_id}"
-    q[1].number_input("done", min_value=0, step=1, value=s["cfa_q_done"], key=kd,
-                      on_change=_save_cfa_q, args=(sec_id, "cfa_q_done", kd))
-    q[2].number_input("of total", min_value=0, step=1, value=s["cfa_q_total"], key=kt,
-                      on_change=_save_cfa_q, args=(sec_id, "cfa_q_total", kt),
-                      help="However many the CFA reading actually has — type it as you go.")
-    st.caption(f"One job per resource — {curr.RESOURCE_ROLES}. Saves as you click. "
-               "Advisory, like the LOS ticks: the items table below is what completes the "
-               "reading and arms its reviews. Spaced reviews stay in the Reviews tab.")
+    for n, (key, kind, label, help_txt) in enumerate(curr.STUDY_LOOP_STEPS, start=1):
+        if kind == "flag":
+            wkey = f"loop_{key}_{sec_id}"
+            st.checkbox(f"**{n}.** {label}", value=s[key], key=wkey, help=help_txt,
+                        on_change=_toggle_loop_flag, args=(sec_id, key, wkey))
+        elif kind == "items":
+            # the one step the loop doesn't own — point at the tier that does
+            c = st.columns([4.2, 5.8], vertical_alignment="center")
+            c[0].markdown(_loop_step_label(n, label, items_ok), unsafe_allow_html=True)
+            c[1].markdown(f"<div class='loop-hint'>{items_done}/{n_items} modules at "
+                          f"Practice Complete — set each row's <b>Status</b> in the table "
+                          f"below ↓</div>", unsafe_allow_html=True)
+        else:                                     # the CFA-question done/total pair
+            # labels collapsed and an "of" between the boxes, so this step stays one line
+            # like the other five and reads left to right: CFA Qs — 18 of 24.
+            c = st.columns([4.2, 1.2, 0.4, 1.2, 3.0], vertical_alignment="center")
+            c[0].markdown(_loop_step_label(n, label, s["cfa_q_ok"]), unsafe_allow_html=True)
+            kd, kt = f"loop_cqd_{sec_id}", f"loop_cqt_{sec_id}"
+            c[1].number_input("done", min_value=0, step=1, value=s["cfa_q_done"], key=kd,
+                              label_visibility="collapsed", help=help_txt,
+                              on_change=_save_cfa_q, args=(sec_id, "cfa_q_done", kd))
+            c[2].markdown("<div class='loop-of'>of</div>", unsafe_allow_html=True)
+            c[3].number_input("of total", min_value=0, step=1, value=s["cfa_q_total"], key=kt,
+                              label_visibility="collapsed",
+                              help="This reading's total — type it once, however many it has.",
+                              on_change=_save_cfa_q, args=(sec_id, "cfa_q_total", kt))
+    st.caption(f"Work it top to bottom. One job per resource — {curr.RESOURCE_ROLES}. Ticks "
+               "save as you click. Step 2 is the record that counts: when every module hits "
+               "**Practice Complete** the reading is done and its +3/+14/+45 reviews arm. The "
+               "other five are advisory, so a full loop with items outstanding still isn't done.")
     st.markdown("<hr class='page-rule'>", unsafe_allow_html=True)
 
 
@@ -623,8 +653,8 @@ def _study_loop(sec_id, row):
 def section_dialog(sec_id, sec_name, topic):
     st.markdown(f"<span class='page-eyebrow'>{topic}</span><br><b>{sec_name}</b>",
                 unsafe_allow_html=True)
-    _study_loop(sec_id, db.get_module(sec_id))
     subs = db.submodules_for_section(sec_id)
+    _study_loop(sec_id, db.get_module(sec_id), subs)
     show = subs[["id", "code", "name", "status", "confidence", "notes"]].copy()
     fx_col = subs["formulas"].fillna("").apply(
         lambda s: f"{len([ln for ln in s.splitlines() if ln.strip()])} saved" if s.strip() else "—")
@@ -734,8 +764,8 @@ def page_curriculum():
                 f"· {len(los_2027.LOS)} LOS</i>")
     st.caption("Each row is a reading. **Open** it to check off its modules, Key Concepts and "
                "Module Quiz — reading progress, the calendar and the pace bars all roll up from "
-               "there. The five dots are its **study loop** (MM video · CFA read · MM Qs · "
-               "CFA Qs · formula sheet).")
+               "there — that number is the Schweser read, step 2 of the loop. The five dots are "
+               "the loop's other steps (MM video · CFA blue boxes · MM Qs · CFA Qs · formulas).")
     subs_all = db.get_submodules_df()
     cur_topic = None
     for _, s in mods.sort_values(["study_order", "id"]).iterrows():

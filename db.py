@@ -419,7 +419,7 @@ def study_loop_state(row) -> dict:
     out["cfa_q_ok"] = bool(out["cfa_q_total"]
                            and (out["cfa_q_done"] or 0) >= out["cfa_q_total"])
     out["done"] = sum(out[f] for f, _label, _help in curr.STUDY_LOOP_FLAGS) + out["cfa_q_ok"]
-    out["total"] = curr.STUDY_LOOP_STEPS
+    out["total"] = curr.STUDY_LOOP_TICKS
     return out
 
 

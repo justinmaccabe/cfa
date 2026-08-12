@@ -17,23 +17,43 @@ engine (#1) as a focused build, then #3/#5 polish.
 
 ## Per-reading study-loop checklist — DONE (Aug 12, 2026)
 "Give each resource one job," made trackable **at the reading level**, shown in the
-`section_dialog` modal ABOVE the items table. Fixed steps he ticks as he studies each reading:
-- ☐ MM video watched
-- ☐ CFA reading (blue-box examples) skimmed
-- ☐ MM practice questions done
-- ☐ CFA practice questions — **done / total** (Justin TYPES the total per reading himself — he chose manual entry, no CFAI parsing)
-- ☐ Formula sheet / QuickSheet updated
-(Spaced reviews stay in the existing system — NOT part of this checklist.)
+`section_dialog` modal ABOVE the items table — rendered as a numbered vertical sequence
+**in the order Justin runs it** (his call, Aug 12), so the modal is the instruction sheet
+and he doesn't have to hold the order in his head:
+1. ☐ **MM video** — first exposure, MM builds the mental model
+2. ◇ **Schweser read** — *not a tick*: this is the items table below, one row per module.
+   The step shows `n/m modules at Practice Complete` and says to set each row's **Status**.
+3. ☐ **CFA blue boxes / skim** — the authority, catches what MM compressed
+4. ☐ **MM Qs** — drill
+5. ☐ **CFA Qs** — **done / total** on one line (he TYPES the total per reading — manual
+   entry by choice, no CFAI parsing)
+6. ☐ **Formula sheet / QuickSheet** — the formula pass
+(Spaced reviews stay in the existing system — NOT part of this checklist, and the caption
+says so: the formula pass is not the review.)
+
+**Why step 2 is in the list without being a tick:** he asked "when I complete 1.1, what do
+I tick?" and the first cut had no visible answer — the per-module record was the items
+table's Status column, three feet down the modal with nothing connecting them. Listing the
+Schweser read in its own position, with live item progress and a pointer, closes that gap
+without duplicating the record. Deliberately NOT built: per-item loop columns (an MM-video
+tick on 1.1, 1.2, …). `submodules.status` already tracks per-module read→practice progress,
+so five more columns × 255 rows would triple-track the same thing. Revisit only if he wants
+per-module MM video counts specifically.
 
 **As built:** the six additive columns landed on `modules` exactly as planned (`mm_video`,
 `cfa_read`, `mm_q`, `formula_done` BOOL + `cfa_q_done`, `cfa_q_total` INT), added **nullable**
 via `_migrate` — a pure metadata change on SQLite *and* Postgres, so no wipe and safe on Neon
 after the push. NULL reads as not-done, which is also how "haven't counted the Qs yet" is
 stored. Writes reuse `db.update_module`, unchanged.
-- `curr.STUDY_LOOP_FLAGS` holds the four ticks with their labels/help text;
-  `db.study_loop_state(row)` is the one reader, used by both the modal and the Curriculum pips,
-  so the two can't drift. CFA Qs have no tick of their own — the step clears when a total is
-  entered and done reaches it (overshoot counts; a total of 0 doesn't).
+- `curr.STUDY_LOOP_STEPS` is the ordered display spec — `(key, kind, label, help)` where kind
+  is `flag` (a boolean column), `items` (the derived Schweser-read pointer) or `count` (the
+  CFA-Q pair). `STUDY_LOOP_FLAGS` derives the four booleans from it, so the loop's order lives
+  in exactly one place. `db.study_loop_state(row)` is the one reader, used by both the modal
+  and the Curriculum pips, so the two can't drift. CFA Qs have no tick of their own — the step
+  clears when a total is entered and done reaches it (overshoot counts; a total of 0 doesn't).
+- The tick count stays **n/5**: the Schweser read is excluded on purpose, because
+  double-counting it would let a full loop claim a reading was covered when the items say
+  otherwise. The header shows both — `n/5 ticked · Schweser modules n/m`.
 - **Deviation from the original build note (which asked for a save):** no Save button — each
   control persists itself through an `on_change` callback, because `st.rerun()` inside this
   dialog fragment would slam the modal shut on every tick (the same constraint the LOS
