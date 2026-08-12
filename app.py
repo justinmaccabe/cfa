@@ -32,7 +32,7 @@ import los_2027
 # Streamlit Cloud keeps a warm process: app.py re-runs on each deploy but sibling
 # modules can stay stale in sys.modules, so a newly-added db/curr symbol raises
 # AttributeError until reboot. Reload them if a recent symbol is missing.
-if not hasattr(db, "los_for_reading") or not hasattr(curr, "READINGS"):
+if not hasattr(db, "study_loop_state") or not hasattr(curr, "STUDY_LOOP_FLAGS"):
     importlib.reload(curr)
     importlib.reload(los_2027)
     importlib.reload(db)
@@ -184,6 +184,14 @@ h2, h3 {{ color:{INK}; border-left:3px solid {PRIMARY}; padding-left:.55rem; }}
     font-size:.7rem; letter-spacing:.13em; text-transform:uppercase; color:{PRIMARY};
     font-weight:700; }}
 .los-count {{ font-size:.8rem; color:{MUTE}; font-style:italic; font-weight:400; }}
+
+/* --- per-reading study loop (reading modal + curriculum row pips) --- */
+.loop-count {{ font-size:.8rem; color:{MUTE}; font-style:italic; font-weight:400; }}
+.loop-lab {{ font-size:.88rem; color:{INK}; }}
+.loop-lab .tick {{ color:{TEAL}; font-weight:700; }}
+.loop-lab .tick.off {{ color:{MUTE}; font-weight:400; }}
+.loop-pip {{ font-size:.66rem; letter-spacing:.12em; color:{TEAL}; white-space:nowrap; }}
+.loop-pip.none {{ color:rgba(51,87,101,.28); }}
 
 /* --- resource cards --- */
 .rescard {{ border:1px solid rgba(51,87,101,.2); border-left:4px solid {PRIMARY};
@@ -566,10 +574,56 @@ def _toggle_los(los_id, key):
     db.set_los_done(los_id, bool(st.session_state.get(key)))
 
 
+def _toggle_loop_flag(sec_id, field, key):
+    """Persist one study-loop tick. on_change for the same reason as the LOS ticks: this
+    runs inside a dialog fragment, so a compare-then-st.rerun() save would rerun the whole
+    app and shut the modal on every click."""
+    db.update_module(sec_id, **{field: bool(st.session_state.get(key))})
+
+
+def _save_cfa_q(sec_id, field, key):
+    """Persist one of the CFA-question numbers. Clearing the box writes NULL back, which
+    reads as 'not counted yet' rather than zero."""
+    v = st.session_state.get(key)
+    db.update_module(sec_id, **{field: None if v is None else int(v)})
+
+
+def _study_loop(sec_id, row):
+    """The five fixed steps to run on every reading — one job per resource — ticked at the
+    READING level, above the items table. Re-read from the DB on each fragment run so the
+    count tracks the ticks; each control saves itself, so there's no Save to forget."""
+    s = db.study_loop_state(row)
+    st.markdown(f"##### 🔁 Study loop "
+                f"<span class='loop-count'>· {s['done']}/{s['total']} done</span>",
+                unsafe_allow_html=True)
+    cols = st.columns(len(curr.STUDY_LOOP_FLAGS))
+    for col, (field, label, help_txt) in zip(cols, curr.STUDY_LOOP_FLAGS):
+        key = f"loop_{field}_{sec_id}"
+        col.checkbox(label, value=s[field], key=key, help=help_txt,
+                     on_change=_toggle_loop_flag, args=(sec_id, field, key))
+    # CFA questions are a done-of-total pair, not a tick: Justin types the total for this
+    # reading himself, and the step clears when done reaches it.
+    q = st.columns([1.5, 1, 1, 3.8], vertical_alignment="bottom")
+    tick = "✓" if s["cfa_q_ok"] else "○"
+    q[0].markdown(f"<span class='loop-lab'><span class='tick{'' if s['cfa_q_ok'] else ' off'}'>"
+                  f"{tick}</span> CFA practice Qs</span>", unsafe_allow_html=True)
+    kd, kt = f"loop_cqd_{sec_id}", f"loop_cqt_{sec_id}"
+    q[1].number_input("done", min_value=0, step=1, value=s["cfa_q_done"], key=kd,
+                      on_change=_save_cfa_q, args=(sec_id, "cfa_q_done", kd))
+    q[2].number_input("of total", min_value=0, step=1, value=s["cfa_q_total"], key=kt,
+                      on_change=_save_cfa_q, args=(sec_id, "cfa_q_total", kt),
+                      help="However many the CFA reading actually has — type it as you go.")
+    st.caption(f"One job per resource — {curr.RESOURCE_ROLES}. Saves as you click. "
+               "Advisory, like the LOS ticks: the items table below is what completes the "
+               "reading and arms its reviews. Spaced reviews stay in the Reviews tab.")
+    st.markdown("<hr class='page-rule'>", unsafe_allow_html=True)
+
+
 @st.dialog("Reading", width="large")
 def section_dialog(sec_id, sec_name, topic):
     st.markdown(f"<span class='page-eyebrow'>{topic}</span><br><b>{sec_name}</b>",
                 unsafe_allow_html=True)
+    _study_loop(sec_id, db.get_module(sec_id))
     subs = db.submodules_for_section(sec_id)
     show = subs[["id", "code", "name", "status", "confidence", "notes"]].copy()
     fx_col = subs["formulas"].fillna("").apply(
@@ -654,6 +708,17 @@ def section_dialog(sec_id, sec_name, topic):
         st.rerun()
 
 
+def _loop_pip(row):
+    """Five dots = the five study-loop steps, so a half-finished loop is visible without
+    opening the reading. Reads the page-level modules frame, which is fine here: ticking
+    happens in the modal, and closing it reruns the app."""
+    s = db.study_loop_state(row)
+    done, tot = s["done"], s["total"]
+    cls = "loop-pip" if done else "loop-pip none"
+    dots = "●" * done + "○" * (tot - done)
+    return f"<span class='{cls}' title='Study loop: {done}/{tot} steps'>{dots}</span>"
+
+
 def _bar(fill, done, tot):
     """Bar fill % and the done/tot label are decoupled: on Curriculum the fill shows
     reading progress while the number stays practice-complete."""
@@ -668,7 +733,9 @@ def page_curriculum():
                 f"· {n_ch} Chapters · {n_read} Readings · {n_items} Items "
                 f"· {len(los_2027.LOS)} LOS</i>")
     st.caption("Each row is a reading. **Open** it to check off its modules, Key Concepts and "
-               "Module Quiz — reading progress, the calendar and the pace bars all roll up from there.")
+               "Module Quiz — reading progress, the calendar and the pace bars all roll up from "
+               "there. The five dots are its **study loop** (MM video · CFA read · MM Qs · "
+               "CFA Qs · formula sheet).")
     subs_all = db.get_submodules_df()
     cur_topic = None
     for _, s in mods.sort_values(["study_order", "id"]).iterrows():
@@ -682,11 +749,12 @@ def page_curriculum():
         read_done = int(mod_items["status"].isin(curr.READ_DONE_STATES).sum())
         fill = read_done / len(mod_items) * 100 if len(mod_items) else 0        # bar = reading
         done, tot = int(sub["status"].isin(curr.ITEM_COMPLETE).sum()), len(sub)  # number = practice
-        c = st.columns([0.7, 6, 2, 1.3], vertical_alignment="center")
+        c = st.columns([0.7, 5.3, 2, 0.9, 1.3], vertical_alignment="center")
         c[0].markdown(f"<span class='cur-bk'>Bk {int(s['book'])}</span>", unsafe_allow_html=True)
         c[1].markdown(f"**{s['name']}**")
         c[2].markdown(_bar(fill, done, tot), unsafe_allow_html=True)
-        if c[3].button("Open ▸", key=f"open_{s['id']}", width="stretch"):
+        c[3].markdown(_loop_pip(s), unsafe_allow_html=True)
+        if c[4].button("Open ▸", key=f"open_{s['id']}", width="stretch"):
             section_dialog(int(s["id"]), s["name"], s["topic"])
 
 

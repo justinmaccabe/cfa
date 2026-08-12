@@ -42,6 +42,22 @@ places: reading 1 is four LMs, reading 41 is one per Standard I-VII.
 LOS ticks are advisory — they do NOT complete a reading or arm reviews, so don't infer
 coverage from them alone. `submodules.status` remains the record of content covered.
 
+## The per-reading study loop
+Five fixed steps per reading, on `modules`: `mm_video`, `cfa_read`, `mm_q`,
+`formula_done` (booleans) plus `cfa_q_done` / `cfa_q_total` (Justin types the total for
+each reading himself). Read them through `db.study_loop_state(row)`, which coerces a
+row and reports `done`/`total` — CFA questions count as cleared once a total is entered
+and done has reached it. Write with `db.update_module(id, mm_video=True, ...)`; so
+"watched the MM video for Time-Series" is `db.update_module(2, mm_video=True)`.
+
+NULL means not-done (the columns were added additively to an existing DB), so go through
+`study_loop_state` rather than testing a raw column. These ticks are **advisory**: they
+do not complete a reading or arm reviews — `submodules.status` still does that.
+
+The loop encodes one job per resource: **MM = teacher · CFA = authority + Qs ·
+Schweser = review/formulas**. Useful in conversation — if he's stuck on a reading, ask
+which steps are still open rather than guessing what he's tried.
+
 ## Confirm before writing
 Mutating rows is a side effect — echo back what you're about to record ("Logging:
 Equity practice, 18/25, ~15 min") and write on a clear yes, so the shared record

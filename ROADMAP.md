@@ -15,6 +15,37 @@ Living backlog for the CFA L2 tracker. Not started yet — revisit on request.
 Suggested order when we resume: quick morale wins (#2, #4) first, then the drill
 engine (#1) as a focused build, then #3/#5 polish.
 
+## Per-reading study-loop checklist — DONE (Aug 12, 2026)
+"Give each resource one job," made trackable **at the reading level**, shown in the
+`section_dialog` modal ABOVE the items table. Fixed steps he ticks as he studies each reading:
+- ☐ MM video watched
+- ☐ CFA reading (blue-box examples) skimmed
+- ☐ MM practice questions done
+- ☐ CFA practice questions — **done / total** (Justin TYPES the total per reading himself — he chose manual entry, no CFAI parsing)
+- ☐ Formula sheet / QuickSheet updated
+(Spaced reviews stay in the existing system — NOT part of this checklist.)
+
+**As built:** the six additive columns landed on `modules` exactly as planned (`mm_video`,
+`cfa_read`, `mm_q`, `formula_done` BOOL + `cfa_q_done`, `cfa_q_total` INT), added **nullable**
+via `_migrate` — a pure metadata change on SQLite *and* Postgres, so no wipe and safe on Neon
+after the push. NULL reads as not-done, which is also how "haven't counted the Qs yet" is
+stored. Writes reuse `db.update_module`, unchanged.
+- `curr.STUDY_LOOP_FLAGS` holds the four ticks with their labels/help text;
+  `db.study_loop_state(row)` is the one reader, used by both the modal and the Curriculum pips,
+  so the two can't drift. CFA Qs have no tick of their own — the step clears when a total is
+  entered and done reaches it (overshoot counts; a total of 0 doesn't).
+- **Deviation from the original build note (which asked for a save):** no Save button — each
+  control persists itself through an `on_change` callback, because `st.rerun()` inside this
+  dialog fragment would slam the modal shut on every tick (the same constraint the LOS
+  checklist hit). The `n/5 done` counter re-reads the row each fragment run, so it stays in
+  step with what's actually stored rather than with what's on screen.
+- Resource-role caption is in place, and the nice-to-have shipped: a five-dot study-loop pip on
+  every Curriculum row (`○○○○○` → `●●●●●`, with a `n/5 steps` tooltip).
+- Advisory by design, like the LOS ticks: `submodules.status` still completes a reading and
+  arms its reviews. Spaced reviews stayed out of the checklist, as specified.
+- Verified against a copy of the live DB: 42 readings / 255 items / 382 LOS intact, no reading
+  status or review clock touched. Not built: rolling the loop into pace/analytics.
+
 ## Official 2027 LOS integration — DONE (Aug 11, 2026)
 The **official CFA Institute 2027 Level II topic outline**
 (`~/Downloads/2027-cfa_l2_topic_outline.pdf`, 30pp) is now in the app: **10 topic areas,

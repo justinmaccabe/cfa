@@ -358,3 +358,22 @@ for _t, _title, _bk, _rd in READINGS:
 ITEM_STATUS_OPTIONS = ["Not Started", "Reading in Process", "Reading Completed",
                        "Practice in Process", "Practice Complete"]
 ITEM_COMPLETE = {"Practice Complete"}
+
+# ---- the per-reading study loop -------------------------------------------
+# "Give each resource one job": MM teaches it, the CFA curriculum is the authority
+# (and the questions that match the exam), Schweser is review/formulas. These are the
+# five fixed steps to run on EVERY reading, tracked at the READING level rather than
+# per item — one MM video covers a whole reading, so the X.Y tier is the wrong grain.
+#
+# Four are simple ticks. The fifth, CFA practice questions, is a done/total pair
+# instead: it gets worked through over several sittings, and the total is typed by
+# hand per reading (no CFAI parsing). It renders below these four because it needs
+# the number pair, which is also why it isn't in this list.
+STUDY_LOOP_FLAGS = [
+    ("mm_video",     "MM video",      "Mark Meldrum video for this reading watched"),
+    ("cfa_read",     "CFA read",      "Official CFA reading skimmed — the blue-box examples especially"),
+    ("mm_q",         "MM Qs",         "Mark Meldrum practice questions done"),
+    ("formula_done", "Formula sheet", "Formula sheet / Schweser QuickSheet updated for this reading"),
+]
+STUDY_LOOP_STEPS = len(STUDY_LOOP_FLAGS) + 1     # + CFA practice questions (done/total)
+RESOURCE_ROLES = "MM = teacher · CFA = authority + Qs · Schweser = review / formulas"

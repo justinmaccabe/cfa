@@ -61,6 +61,16 @@ modules = Table(
     Column("r2_done", Boolean, nullable=False, default=False),
     Column("r3_done", Boolean, nullable=False, default=False),
     Column("notes", Text),
+    # The per-reading study loop (curr.STUDY_LOOP_FLAGS + the CFA-question pair).
+    # All nullable on purpose: rows seeded before these columns existed read as NULL,
+    # and NULL means "not done yet" — see study_loop_state. A NULL cfa_q_total is the
+    # honest state for "haven't counted the questions in this reading yet".
+    Column("mm_video", Boolean),
+    Column("cfa_read", Boolean),
+    Column("mm_q", Boolean),
+    Column("formula_done", Boolean),
+    Column("cfa_q_done", Integer),
+    Column("cfa_q_total", Integer),
 )
 
 # Every study event: reading, a practice set, a review pass. num_q/num_correct are
@@ -217,6 +227,14 @@ def _migrate():
     with engine.begin() as conn:
         if "study_order" not in cols:
             conn.execute(text("ALTER TABLE modules ADD COLUMN study_order INTEGER"))
+        # per-reading study loop. Added nullable with no default, so this is a pure
+        # metadata change on both SQLite and Postgres: no table rewrite, no wipe, and
+        # existing readings keep their progress and simply read as unticked.
+        for name, sqltype in (("mm_video", "BOOLEAN"), ("cfa_read", "BOOLEAN"),
+                              ("mm_q", "BOOLEAN"), ("formula_done", "BOOLEAN"),
+                              ("cfa_q_done", "INTEGER"), ("cfa_q_total", "INTEGER")):
+            if name not in cols:
+                conn.execute(text(f"ALTER TABLE modules ADD COLUMN {name} {sqltype}"))
         if insp.has_table("submodules"):
             subcols = {c["name"] for c in insp.get_columns("submodules")}
             if "formulas" not in subcols:
@@ -298,6 +316,17 @@ def get_modules_df() -> pd.DataFrame:
     return pd.read_sql(select(modules).order_by(modules.c.id), engine)
 
 
+def get_module(module_id: int) -> dict:
+    """One reading's row as a plain dict. The reading modal re-reads this on every run
+    instead of slicing the page-level modules frame, because that frame is loaded once
+    per app run and a dialog is a fragment: without the re-read, a tick's new count
+    wouldn't show until the modal closed."""
+    with engine.connect() as conn:
+        row = conn.execute(select(modules).where(modules.c.id == int(module_id))
+                           ).mappings().first()
+    return dict(row) if row else {}
+
+
 def get_study_log_df() -> pd.DataFrame:
     return pd.read_sql(select(study_log).order_by(study_log.c.date), engine)
 
@@ -361,6 +390,37 @@ def update_submodule(sub_id: int, **fields):
         sec = conn.execute(select(submodules.c.section_id)
                            .where(submodules.c.id == int(sub_id))).scalar()
     _rollup_section(sec)   # rolls the reading's status + review clock up from its items
+
+
+# ---- per-reading study loop ---------------------------------------
+def _flag(v) -> bool:
+    """SQL NULL / pandas NaN -> False, so a reading from before the migration reads as
+    unticked rather than blowing up on None."""
+    return False if pd.isna(v) else bool(v)
+
+
+def _count(v):
+    """NULL-preserving int: None means "no number entered yet", which is different from 0."""
+    return None if pd.isna(v) else int(v)
+
+
+def study_loop_state(row) -> dict:
+    """One reading's study-loop state, coerced for display. Takes a modules row (dict or
+    DataFrame row) and returns the four flags as real bools, the CFA-question pair as
+    ints-or-None, and how many of the five steps are cleared.
+
+    CFA practice questions count as cleared once a total has been entered and done has
+    reached it — there's no separate tick for them, the numbers are the tick. Writes go
+    through update_module; nothing here completes a reading or arms its reviews (that's
+    still submodules.status), so the loop is advisory, like the LOS ticks."""
+    out = {f: _flag(row.get(f)) for f, _label, _help in curr.STUDY_LOOP_FLAGS}
+    out["cfa_q_done"] = _count(row.get("cfa_q_done"))
+    out["cfa_q_total"] = _count(row.get("cfa_q_total"))
+    out["cfa_q_ok"] = bool(out["cfa_q_total"]
+                           and (out["cfa_q_done"] or 0) >= out["cfa_q_total"])
+    out["done"] = sum(out[f] for f, _label, _help in curr.STUDY_LOOP_FLAGS) + out["cfa_q_ok"]
+    out["total"] = curr.STUDY_LOOP_STEPS
+    return out
 
 
 # ---- official Learning Outcome Statements -------------------------
